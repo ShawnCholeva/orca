@@ -129,7 +129,7 @@ export function headline(runs: RunSummary[]): string {
     const reasons = new Set(infra.map((r) => r.terminationEvidence).filter((e): e is string => e != null));
     const observed =
       reasons.size === 1
-        ? `${infra.length} of your ${ended.length} runs that ended stopped the same way — ${[...reasons][0]}.`
+        ? `${infra.length} of your ${ended.length} runs that ended stopped the same way — ${withoutEngineCode([...reasons][0]!)}.`
         : `${infra.length} of your ${ended.length} runs that ended stopped for reasons in the substrate rather than the workflow.`;
     const left = `That leaves ${finished.length} completed run${finished.length === 1 ? "" : "s"} that can tell you anything about the workflow itself.`;
     // The mechanism is a diagnosis, not an observation — say which it is. Runs that
@@ -199,6 +199,14 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
     <div style={{ display: "grid", gap: "var(--sp-1)", justifyItems: "end", textAlign: "right" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)" }}>
         <span className="mono" style={{ fontSize: "var(--fs-5)", fontWeight: 600, letterSpacing: -0.4 }}>{usd(cost.usd)}</span>
+        {silent > 0 && (
+          <MeasurementLabel
+            compact
+            state="uninstrumented"
+            lossy
+            fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is lower than the run actually cost.`}
+          />
+        )}
         {/* No per-row tag for `not_applicable`: it was true on five of six rows, and
             CostCaveats states it once above the list with its count. A marker carried
             by almost every row marks nothing. */}
@@ -220,16 +228,7 @@ function CostCell({ cost }: { cost: RunSummary["cost"] }) {
         <span style={{ fontSize: "var(--fs-1)", color: reported === total ? "var(--text-3)" : "var(--warn)", whiteSpace: "nowrap" }} className="mono">
           {reported} of {total} nodes reported a cost
         </span>
-        {silent > 0 && (
-          // Absent from the ratio beside it, not counted as unreported — so this
-          // total is understated by an amount the run itself cannot state.
-          <MeasurementLabel
-            compact
-            state="uninstrumented"
-            lossy
-            fix={`${silent} more node${silent === 1 ? "" : "s"} spent money and reported nothing, so this total is lower than the run actually cost.`}
-          />
-        )}
+
       </div>
       {cost.rollupCheck === "diverged" && (
         // Never compacted: this one differs per run and is a defect rather than a
@@ -317,9 +316,9 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
             date, the version and the outcome sentence at near-equal weight, so the
             row opened with four competing entry points and the reader had none. */}
         <div style={{ display: "flex", gap: "var(--sp-2)", alignItems: "baseline", flexWrap: "wrap" }}>
-          <span style={{ fontSize: "var(--fs-4)", fontWeight: 600 }}>{run.templateName}</span>
+          <span style={{ fontSize: "var(--fs-4)", fontWeight: 600 }}>{run.goalTitle}</span>
           <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-            v{run.templateVersion} · {day(run.startedAt)}
+            {run.templateName} v{run.templateVersion} · {day(run.startedAt)}
           </span>
         </div>
         {/* The outcome, with its evidence on the same line rather than orphaned on
@@ -448,7 +447,8 @@ function SpanRow({ span }: { span: RunTraceSpan }) {
                 "attempt 1 · passed" and "redone 1x" on the same row, which cannot both
                 be true. The attempt count is beside the step name and is the authority
                 on retries; this says what the extra event actually was. */}
-            {span.completions > 1 && `finished ${span.completions}x — sent back, then accepted`}
+            {span.completions > 1 &&
+              `finished ${span.completions}x — sent back ${span.completions - 1 === 1 ? "once" : `${span.completions - 1} times`}`}
           </span>
         )}
       </div>
@@ -548,7 +548,7 @@ export function RunDetailPanel({ detail, onBack }: { detail: RunDetail; onBack: 
       </div>
       <div style={{ display: "grid", gap: 8 }}>
         <h2 style={{ fontSize: "var(--fs-5)", margin: 0 }}>
-          {run.templateName} <span style={{ color: "var(--text-3)", fontWeight: 400 }}>v{run.templateVersion} · {day(run.startedAt)}</span>
+          {run.goalTitle} <span style={{ color: "var(--text-3)", fontWeight: 400 }}>{run.templateName} v{run.templateVersion} · {day(run.startedAt)}</span>
         </h2>
         <span style={{ fontSize: "var(--fs-3)", color: TERMINATION_TONE[run.terminationCause], fontWeight: 600 }}>
           {TERMINATION_SENTENCE[run.terminationCause]}

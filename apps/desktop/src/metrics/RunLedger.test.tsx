@@ -199,7 +199,12 @@ describe("headline", () => {
     // States the OBSERVED outcome; the mechanism is marked as a diagnosis rather
     // than asserted for runs nobody attributed individually.
     expect(h).toContain("2 of your 3 runs that ended stopped the same way");
-    expect(h).toContain("crashed 3 times (worker_exited_no_signal)");
+    // The engine code is stripped here as it is on the rows: it was the most repeated
+    // string on the screen and names nothing the reader can act on. It stays verbatim
+    // in the run detail, which is where it is worth quoting in a bug report — and one
+    // untranslated code makes every other translated sentence look untranslated too.
+    expect(h).toContain("crashed 3 times");
+    expect(h).not.toContain("worker_exited_no_signal");
     expect(h).toContain("root-caused");
     expect(h).not.toContain("were killed by the daemon");
     // The whole point: it says how much workflow evidence is actually left — and

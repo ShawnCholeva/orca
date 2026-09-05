@@ -77,7 +77,7 @@ export function WaitingOnYouBanner({
     >
       <span>
         <strong style={{ fontWeight: 600 }}>
-          {lead.templateName} has been waiting on you{since ? ` for ${since}` : ""}
+          {lead.goalTitle} has been waiting on you{since ? ` for ${since}` : ""}
         </strong>
         {wants ? ` — ${wants}.` : "."}
       </span>

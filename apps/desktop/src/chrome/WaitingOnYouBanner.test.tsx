@@ -46,7 +46,10 @@ describe("WaitingOnYouBanner", () => {
       awaitingYou: { count: 1, sinceMs: 39 * HOUR, sourceKind: "step_confirmation_pending" },
     })]} />);
     const text = document.body.textContent ?? "";
-    expect(text).toContain("Adaptive Delivery has been waiting on you for 39h 0m");
+    // The GOAL is what's waiting, not the template. He has one template, so naming it
+    // identified nothing — "Adaptive Delivery has been waiting" was true of every run.
+    expect(text).toContain("Add a Kelvin conversion has been waiting on you for 39h 0m");
+    expect(text).not.toContain("Adaptive Delivery has been waiting");
     expect(text).toContain("a step waiting for your OK");
   });
 
@@ -64,9 +67,9 @@ describe("WaitingOnYouBanner", () => {
 
   it("leads with the longest wait and counts the rest", () => {
     render(<WaitingOnYouBanner onOpenGoal={() => {}} runs={[
-      run({ runId: "a", goalId: "ga", templateName: "Short one",
+      run({ runId: "a", goalId: "ga", goalTitle: "Short one",
             awaitingYou: { count: 1, sinceMs: HOUR, sourceKind: "question_pending" } }),
-      run({ runId: "b", goalId: "gb", templateName: "Long one",
+      run({ runId: "b", goalId: "gb", goalTitle: "Long one",
             awaitingYou: { count: 1, sinceMs: 39 * HOUR, sourceKind: "mark_done_pending" } }),
     ]} />);
     expect(document.body.textContent).toContain("Long one has been waiting");
