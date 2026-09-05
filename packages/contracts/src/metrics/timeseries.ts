@@ -28,19 +28,19 @@ export const TimeseriesSpec: Record<
 > = {
   session_started: {
     label: "Agent sessions started",
-    placedBy: "sessions.created_at",
+    placedBy: "session.created event",
     caveat: null,
   },
   session_failed: {
     label: "Agent sessions that failed",
-    placedBy: "sessions.exited_at",
-    // The same hazard as `activities.updated_at`: a name that promises more than
-    // the value carries. `exited_at` is when the daemon NOTICED and stamped the
-    // failure, which the liveness watchdog does one grace window plus one tick
-    // after the worker actually died. The shape of the series is right; the
-    // placement lags reality by up to ~20s, and a reader comparing it against
-    // something with a true event time should know that.
-    caveat: "Stamped when the daemon noticed the failure, not when the worker died.",
+    placedBy: "session.failed event",
+    // The event is written when the daemon NOTICES, which the liveness watchdog
+    // does one grace window plus one tick after the worker actually died. The
+    // shape of the series is right; the placement lags reality by up to ~20s, and
+    // a reader comparing it against something with a true event time should know.
+    // Same hazard as `activities.updated_at`: a timestamp whose name promises
+    // more than the value carries.
+    caveat: "Recorded when the daemon noticed the failure, not when the worker died.",
   },
 };
 

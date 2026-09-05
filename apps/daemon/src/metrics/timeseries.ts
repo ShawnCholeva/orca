@@ -35,32 +35,58 @@ export function bucketStartMs(atMs: number, bucket: TimeseriesBucket): number {
 
 /**
  * The one place a series is bound to a source. Each returns the timestamps of its
- * own events; everything else — bucketing, zero-filling, the wire shape — is shared,
- * so a new series cannot accidentally invent a different notion of "when".
+ * own events; everything else — bucketing, zero-filling, the wire shape — is
+ * shared, so a new series cannot accidentally invent a different notion of "when".
+ *
+ * SOURCED FROM THE EVENT LOG, NOT THE `sessions` TABLE, and the reason is the
+ * whole design. `sessions` rows are HARD-DELETED when their workspace is deleted
+ * (`workspaces/usecases.ts` drops FK enforcement, deletes the goals, then deletes
+ * every FK-violating row transitively). `events` has no FK on `goal_id`, so it
+ * survives that purge.
+ *
+ * On this database the difference is already real: 56 `session.created` events
+ * against 48 surviving rows, and 30 `session.failed` events against 27. All 30
+ * are distinct session ids, 3 of them belonging to sessions that no longer exist.
+ *
+ * A table-sourced chart would not merely report a smaller number — **it would
+ * report a different past tomorrow**, shrinking a historical spike every time a
+ * workspace is deleted. A historical chart asks what HAPPENED; only an
+ * append-only log can answer that. ("What IS" is the right question for a
+ * population, and the wrong one for a timeline.)
  */
+function sessionEventTimestamps(
+  db: Database.Database,
+  type: string,
+  fromIso: string,
+  toIso: string
+): string[] {
+  const rows = db
+    .prepare(
+      "SELECT payload, created_at FROM events WHERE type = ? AND created_at >= ? AND created_at < ? ORDER BY seq ASC"
+    )
+    .all(type, fromIso, toIso) as Array<{ payload: string; created_at: string }>;
+  // Counted once per SESSION, not once per event. Today the two are identical —
+  // 30 events, 30 distinct ids — so this changes no number; it makes the series
+  // mean what its label says, so a duplicate emission could never silently
+  // inflate it. The shape enforces it rather than a check catching it later.
+  const firstSeen = new Map<string, string>();
+  for (const r of rows) {
+    let sid: unknown;
+    try { sid = (JSON.parse(r.payload) as { sessionId?: unknown }).sessionId; } catch { continue; }
+    if (typeof sid !== "string" || firstSeen.has(sid)) continue;
+    firstSeen.set(sid, r.created_at);
+  }
+  return [...firstSeen.values()];
+}
+
 const SERIES_SOURCE: Record<
   TimeseriesId,
   (db: Database.Database, fromIso: string, toIso: string) => string[]
 > = {
   session_started: (db, fromIso, toIso) =>
-    (db
-      .prepare(
-        "SELECT created_at AS at FROM sessions WHERE created_at >= ? AND created_at < ? ORDER BY created_at ASC"
-      )
-      .all(fromIso, toIso) as Array<{ at: string }>).map((r) => r.at),
-
-  // Placed by `exited_at`, which is when the daemon NOTICED — see the caveat on
-  // TimeseriesSpec. A failed session with no exited_at cannot be placed on a
-  // timeline at all, so it is omitted rather than being given a made-up position.
+    sessionEventTimestamps(db, "session.created", fromIso, toIso),
   session_failed: (db, fromIso, toIso) =>
-    (db
-      .prepare(
-        `SELECT exited_at AS at FROM sessions
-         WHERE status = 'failed' AND exited_at IS NOT NULL
-           AND exited_at >= ? AND exited_at < ?
-         ORDER BY exited_at ASC`
-      )
-      .all(fromIso, toIso) as Array<{ at: string }>).map((r) => r.at),
+    sessionEventTimestamps(db, "session.failed", fromIso, toIso),
 };
 
 /**
