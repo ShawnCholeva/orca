@@ -173,8 +173,15 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   // What the policy stopped, by the reason it gave. A decision can carry several
   // reasons and each is counted; allows are not stops and are not here.
   const stopsByReason = new Map<string, { denied: number; approvals: number }>();
+  // The decision counts come from the SAME rows as the reasons beneath them. The
+  // first draft took the counts from the template endpoint's 30-day period and the
+  // reasons from the run list, and the panel read "sent to you to approve: 0" above
+  // "7 sent to you" — the two-populations defect, inside one panel, one commit after
+  // it was fixed next door.
+  const stops = { denied: 0, approvals: 0, allowed: 0 };
   for (const d of details.filter((x) => endedIds.has(x.run.runId)).flatMap((x) => x.toolDecisions)) {
-    if (d.decision === "allow") continue;
+    if (d.decision === "allow") { stops.allowed += 1; continue; }
+    if (d.decision === "deny") stops.denied += 1; else stops.approvals += 1;
     for (const reason of d.reasons) {
       const e = stopsByReason.get(reason) ?? { denied: 0, approvals: 0 };
       if (d.decision === "deny") e.denied += 1; else e.approvals += 1;
@@ -228,7 +235,7 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   }
 
   return {
-    runs, ended, details, byStep, byModel, tokens: tokenSums, byVersion, stopsByReason, gates,
+    runs, ended, details, byStep, byModel, tokens: tokenSums, byVersion, stops, stopsByReason, gates,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -585,40 +592,38 @@ export function Dashboard({ agg }: { agg: Agg }) {
               </Panel>
 
               <Panel title="Blocked by the safety floor" span={3}>
-                {agg.gates === null
-                  ? <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Not available for this window.</span>
-                  : (
-                    <>
-                      {/* Bars rather than a ring: the zeros are the finding, and a ring
-                          drops a zero slice entirely. An empty track says "never happened"
-                          where a missing arc says nothing at all. */}
-                      <BarList
-                        tone={TONE.stopped}
-                        scaleTo={Object.values(agg.gates.policyGateway.decisionDist).reduce((a, b) => a + b, 0)}
-                        items={[
-                          { label: "denied outright", value: agg.gates.policyGateway.decisionDist.deny, display: String(agg.gates.policyGateway.decisionDist.deny) },
-                          { label: "sent to you to approve", value: agg.gates.policyGateway.decisionDist.require_approval, display: String(agg.gates.policyGateway.decisionDist.require_approval) },
-                          { label: "allowed", value: agg.gates.policyGateway.decisionDist.allow, display: String(agg.gates.policyGateway.decisionDist.allow) },
-                        ]}
-                      />
-                      {/* `decideGate` returns "deny" ONLY when a hard constraint is
-                          violated — a critical risk class on its own returns
-                          require_approval. So a denial is not "the policy was strict", it
-                          is an agent reaching for a credential file, a protected system
-                          path, or a recursive delete, and being stopped. */}
-                      <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-                        Each denial is a hard safety constraint — a credential file, a protected path, a
-                        recursive delete. Nothing was denied for being merely risky.
-                      </p>
-                      <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
-                        Counts only tool calls that needed a permission decision, so it measures the policy
-                        rather than the agent.
-                      </p>
-                    </>
-                  )}
-                {/* The reasons themselves, from the runs that ended. The counts above
-                    say the floor held; these say what it held against, which is the
-                    only record of what the agent reached for. */}
+                {/* Bars rather than a ring: the zeros are the finding, and a ring
+                    drops a zero slice entirely. An empty track says "never happened"
+                    where a missing arc says nothing at all.
+
+                    Counted from the runs on this page, not from the template
+                    endpoint: the reasons beneath are read from the same rows, so
+                    the counts and the reasons are one population by construction. */}
+                <BarList
+                  tone={TONE.stopped}
+                  scaleTo={agg.stops.denied + agg.stops.approvals + agg.stops.allowed}
+                  items={[
+                    { label: "denied outright", value: agg.stops.denied, display: String(agg.stops.denied) },
+                    { label: "sent to you to approve", value: agg.stops.approvals, display: String(agg.stops.approvals) },
+                    { label: "allowed", value: agg.stops.allowed, display: String(agg.stops.allowed) },
+                  ]}
+                />
+                {/* `decideGate` returns "deny" ONLY when a hard constraint is
+                    violated — a critical risk class on its own returns
+                    require_approval. So a denial is not "the policy was strict", it
+                    is an agent reaching for a credential file, a protected system
+                    path, or a recursive delete, and being stopped. */}
+                <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+                  Each denial is a hard safety constraint — a credential file, a protected path, a
+                  recursive delete. Nothing was denied for being merely risky.
+                </p>
+                <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+                  Counts only tool calls that needed a permission decision, so it measures the policy
+                  rather than the agent.
+                </p>
+                {/* The reasons themselves. The counts above say the floor held; these
+                    say what it held against, which is the only record of what the
+                    agent reached for. */}
                 {agg.stopsByReason.size > 0 && (
                   <div style={{ paddingTop: "var(--sp-2)", borderTop: "1px solid var(--hairline)", display: "grid", gap: "var(--sp-1)" }}>
                     {[...agg.stopsByReason.entries()].map(([reason, c]) => (

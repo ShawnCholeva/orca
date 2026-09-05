@@ -426,8 +426,13 @@ describe("the harness's own choices reach the surface", () => {
       ["bash: destructive recursive delete (rm -rf)", { denied: 2, approvals: 0 }],
       ["bash: writes outside the workspace", { denied: 0, approvals: 1 }],
     ]);
+    // The counts and the reasons are read from the same rows, so they agree by
+    // construction — the live run's denial is in neither.
+    expect(a.stops).toEqual({ denied: 2, approvals: 1, allowed: 0 });
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
     expect(t).toContain("rm -rf");
-    expect(t).not.toContain("credential");
+    // The panel's own prose names "a credential file" as a category; the live run's
+    // REASON is the specific string, and that is what must stay off the surface.
+    expect(t).not.toContain("secret/credential");
   });
 });
