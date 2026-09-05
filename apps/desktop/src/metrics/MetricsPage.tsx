@@ -12,11 +12,18 @@ import { RunLedger } from "./RunLedger";
 import { WorkflowRollup } from "./WorkflowRollup";
 import { MeasurementLabel } from "./n-gate-ui";
 
-// Three views. `workflow` is the original tab and is deliberately unchanged: a
-// score and a letter grade render there at any sample size, which is the defect
-// `pipeline` exists to not repeat — but the founder's instruction was to leave the
-// old one intact, so it stays exactly as it was.
-type MetricsView = "runs" | "pipeline" | "workflow";
+// Three views.
+//
+// `workflow` is the ORIGINAL tab and is deliberately unchanged: a score and a letter
+// grade render there at any sample size, which is the defect `rollup` exists not to
+// repeat — but the instruction was to leave the old one intact, so it is untouched.
+//
+// The new one is keyed `rollup` rather than `workflows`, though its label is
+// "Workflows". `workflows` and `workflow` differ by one character, both satisfy the
+// union, and a typo either way would silently select the wrong tab with the compiler
+// content. The key names what the view IS — a rollup of a workflow's runs — which is
+// both unambiguous here and stable if the label changes again.
+type MetricsView = "runs" | "rollup" | "workflow";
 
 const PERIODS = ["24h", "7d", "30d"] as const;
 type Period = (typeof PERIODS)[number];
@@ -101,7 +108,7 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
     );
   }
 
-  if (view === "pipeline") {
+  if (view === "rollup") {
     return (
       <div style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 14, padding: 12, height: "100%", minHeight: 0, overflowY: "auto" }}>
         <ViewToggle view={view} onChange={setView} />
@@ -239,7 +246,7 @@ function ViewToggle({ view, onChange }: { view: MetricsView; onChange: (v: Metri
   return (
     <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.03)", border: "1px solid var(--hairline)", borderRadius: 8, padding: 2, width: "fit-content", flexShrink: 0 }}>
       {tab("runs", "Runs")}
-      {tab("pipeline", "Workflows")}
+      {tab("rollup", "Workflows")}
       {tab("workflow", "Workflow averages")}
     </div>
   );

@@ -145,7 +145,7 @@ export function WorkflowCard({ rollup }: { rollup: Rollup }) {
         <Figure value={dur(rollup.workingMs)} label="orca working" tone="var(--run)" />
         <Figure
           value={parkedShare == null ? dur(rollup.parkedMs) : `${parkedShare}%`}
-          label={`of those ${dur(rollup.elapsedMs)} was waiting on you`}
+          label="waiting on you"
           tone="var(--accent-2)"
         />
       </div>
