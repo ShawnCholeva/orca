@@ -433,7 +433,7 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
         <IntervalBar
           elapsedMs={span.elapsedMs}
           workingMs={span.elapsedMs == null ? null : span.workingMs ?? 0}
-          parkedMs={span.elapsedMs == null ? null : 0}
+          parkedMs={span.parkedMs}
           unaccountedMs={span.elapsedMs == null ? null : Math.max(0, span.elapsedMs - (span.workingMs ?? 0))}
         />
         {span.elapsedMs == null ? (

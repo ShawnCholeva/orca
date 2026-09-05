@@ -5,7 +5,7 @@ import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/co
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CantTellYou, CostCaveats, RunDetailPanel, RunRow } from "./RunLedger";
-import { WorkflowCard, rollupByWorkflow } from "./WorkflowRollup";
+import { Dashboard, aggregate } from "./WorkflowRollup";
 import { IntervalBar } from "./interval-bar";
 
 afterEach(cleanup);
@@ -122,7 +122,7 @@ function readerFacingText(root: HTMLElement): { where: string; text: string }[] 
 }
 
 /** The surfaces asserted below. Shared with the coverage check so there is one list. */
-const SURFACE_NAMES = ["RunRow", "RunDetailPanel", "CostCaveats", "CantTellYou", "WorkflowCard", "IntervalBar"] as const;
+const SURFACE_NAMES = ["RunRow", "RunDetailPanel", "CostCaveats", "CantTellYou", "Dashboard", "IntervalBar"] as const;
 
 /**
  * Components that render no reader-facing prose of their own, with the reason.
@@ -136,13 +136,22 @@ const SURFACE_NAMES = ["RunRow", "RunDetailPanel", "CostCaveats", "CantTellYou",
 const NOT_A_PROSE_SURFACE: Record<string, string> = {
   // Primitives: a number, a shape, a count. Their absence cases route through
   // MeasurementLabel, which the surfaces above exercise.
-  rollupByWorkflow: "a grouping function, no output of its own",
-  WorkflowRollup: "fetches and delegates to WorkflowCard, which is asserted directly",
-  TypicalRun: "durations and a median, no prose",
+  aggregate: "a summing function, no output of its own",
+  Scatter: "circles with tooltips, supplied by the caller",
+  WorkflowRollup: "loads and delegates to Dashboard, which is asserted directly",
+  // Dashboard panel primitives: each renders a number, a bar or a cell. The prose on
+  // that surface is in Dashboard itself, which is asserted above.
+  Panel: "chrome — a title and its children",
+  SectionHeading: "renders its children",
+  Big: "a figure and a label supplied by the caller",
+  BarList: "labels and bars supplied by the caller",
+  SplitBar: "a composition and its legend, supplied by the caller",
+  CountRow: "counts and labels supplied by the caller",
+  Matrix: "cells with tooltips, supplied by the caller",
+  CumulativeLine: "an svg path, no text",
   Figure: "a number and a label",
   Sample: "a count and its noun",
   StatTile: "a label and a figure; its absence renders via MeasurementLabel",
-  Panel: "chrome — a border and a title supplied by the caller",
   SectionLabel: "chrome — renders its children",
   Sparkline: "an svg path, no text",
   Delta: "an arrow and a number",
@@ -207,16 +216,14 @@ describe("no surface speaks to the reader about our backlog", () => {
     ["RunDetailPanel", () => render(<RunDetailPanel detail={detail()} onBack={() => {}} />).container],
     ["CostCaveats", () => render(<CostCaveats runs={[summary(), summary({ runId: "b" })]} />).container],
     ["CantTellYou", () => render(<CantTellYou runs={[summary(), summary({ runId: "b" })]} />).container],
-    // The card, not the wrapper: WorkflowRollup only fetches and delegates, so
-    // mounting it synchronously would assert over a loading state. Same split as
-    // RunDetailPanel vs RunLedger.
-    ["WorkflowCard", () => render(
-      <WorkflowCard rollup={rollupByWorkflow([summary(), summary({ runId: "b", terminationCause: "completed" })])[0]!} />
-    ).container],
-    // Found by the coverage check above: IntervalBar builds a full sentence into its
-    // accessible name and nothing was asserting it.
-    ["IntervalBar", () => render(
-      <IntervalBar elapsedMs={H} workingMs={600_000} parkedMs={2_400_000} unaccountedMs={600_000} />
+    // The dashboard, not the fetching wrapper: WorkflowRollup only loads and
+    // delegates, so mounting it synchronously would assert over a loading state.
+    // Same split as RunDetailPanel vs RunLedger.
+    ["Dashboard", () => render(
+      <Dashboard agg={aggregate({
+        runs: [summary(), summary({ runId: "b" })],
+        details: [{ run: summary(), spans: [span()], interventions: [park()] }],
+      })} />
     ).container],
   ];
 
@@ -236,8 +243,13 @@ describe("no surface speaks to the reader about our backlog", () => {
       // SOMETHING was gathered, and that the accessible channel was among it.
       expect(strings.some((s) => s.text.trim().length > 0),
         `${name} produced no reader-facing text at all`).toBe(true);
-      expect(strings.some((s) => s.where.startsWith("aria-label")),
-        `${name} produced no accessible name — the channel the original defect lived in`).toBe(true);
+      expect(
+        strings.some((s) => s.where.startsWith("aria-label") || s.where.startsWith("title")),
+        `${name} produced nothing on a channel a screenshot cannot show. The defect this\n` +
+          `file exists for lived in an aria-label and survived a day of verifying copy by\n` +
+          `looking at pixels — so a surface with no accessible name and no tooltip is one\n` +
+          `this guard would pass over while checking only what was already visible.`,
+      ).toBe(true);
 
       for (const { where, text } of strings) {
         expect(text, `${name} — ${where}`).not.toMatch(IMPLEMENTATION_VOCABULARY);

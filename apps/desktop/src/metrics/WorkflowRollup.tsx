@@ -1,212 +1,387 @@
 import { useEffect, useState } from "react";
-import type { RunSummary } from "@orca/contracts";
-import { gateFor } from "@orca/contracts";
-import { getRunSummaries } from "../api";
+import type { RunDetail, RunSummary } from "@orca/contracts";
+import { getRunDetail, getRunSummaries } from "../api";
 import { formatDuration } from "./interval-bar";
-import { MeasurementLabel } from "./n-gate-ui";
+import {
+  BarList, Big, CountRow, CumulativeLine, Matrix, Panel, Scatter, SectionHeading, SplitBar, gridStyle,
+  type BarItem, type MatrixCell,
+} from "./dashboard-panels";
 
-// Averages of a workflow's runs.
+// The Workflows dashboard.
 //
-// "Average" is the word for it, and most of what is worth knowing here is not one:
-// it is a SUM. Total spend, total elapsed, total time waiting on a person and the
-// share that represents are arithmetic over observed runs — exact at n=1, exact at
-// n=7, no sampling distribution involved. They are the figures this founder actually
-// asks about, and they need no hedging because nothing is being estimated.
+// Every figure here is a COUNT or a SUM — exact at n=1, exact at n=7, nothing
+// estimated. That is not a limitation of the page, it is why it can be dense. The
+// screen was called bare twice, and the answer was never to hedge harder: it was to
+// render the nine-tenths of what we hold that had never reached a surface.
 //
-// What genuinely is an average — a typical run's duration — is gated: a median needs
-// five observations, a mean needs eight and a spread. Below those the runs are shown
-// individually, which at this n is both honest and more informative than a summary.
+// What is deliberately absent, and why, because each will be asked for:
+//   · no rate, mean or percentile   — claims about runs nobody has seen
+//   · no trend line or arrow        — a line through 7 points asserts a trajectory
+//   · no gauge with a threshold arc — an arc encodes a target and nobody has set one.
+//                                     Not permanent: the day a budget or a tolerable
+//                                     wait is chosen, the arc encodes THAT number and
+//                                     becomes legitimate.
+//   · no breakdown of pauses by kind — `source_kind` is read from a row overwritten as
+//                                     the activity advances, so a categorical split is
+//                                     confident about a field we know is corrupted
 //
-// So the page is loud where it is exact and quiet where it is not, rather than
-// uniformly hedged. The old averages tab greys everything to the same tone whether
-// it is a census or a guess, which is why it reads as noise.
+// The cumulative spend line is the single exception to "no lines below n=12": each of
+// its points is itself a running total, so joining them is what cumulative MEANS
+// rather than a trend claim. Its x-axis is run index and must never become a date —
+// as a date axis the slope becomes a rate over irregular sampling.
 
 const dur = (ms: number) => formatDuration(ms) ?? "not recorded";
 const usd = (v: number) => `$${v.toFixed(2)}`;
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
-interface Rollup {
-  templateId: string;
-  name: string;
-  runs: RunSummary[];
-  elapsedMs: number;
-  workingMs: number;
-  parkedMs: number;
-  unaccountedMs: number;
-  usd: number;
-  completed: number;
-  stopped: number;
-  running: number;
-}
+const TONE = {
+  working: "var(--run)",
+  waiting: "var(--accent-2)",
+  unseen: "var(--text-4)",
+  // Orca stopping a run is not the workflow failing — the Runs list renders that
+  // cause neutral for exactly that reason, and red here would contradict it. `stopped`
+  // remains for a step that failed while Orca was working, which is the only failure
+  // this screen can attribute to the workflow.
+  byOrca: "var(--text-3)",
+  stopped: "var(--err)",
+  live: "var(--accent)",
+} as const;
 
-/** Group runs by the workflow that produced them and sum what can be summed. */
-export function rollupByWorkflow(runs: RunSummary[]): Rollup[] {
-  const byId = new Map<string, Rollup>();
-  for (const r of runs) {
-    let g = byId.get(r.templateId);
-    if (!g) {
-      g = {
-        templateId: r.templateId, name: r.templateName, runs: [],
-        elapsedMs: 0, workingMs: 0, parkedMs: 0, unaccountedMs: 0, usd: 0,
-        completed: 0, stopped: 0, running: 0,
-      };
-      byId.set(r.templateId, g);
-    }
-    g.runs.push(r);
-    g.elapsedMs += r.durations.elapsedMs;
-    g.workingMs += r.durations.workingMs;
-    g.parkedMs += r.durations.parkedMs;
-    g.unaccountedMs += r.durations.unaccountedMs;
-    g.usd += r.cost.usd;
-    if (r.terminationCause === "completed") g.completed++;
-    else if (r.terminationCause === "running") g.running++;
-    else g.stopped++;
+export interface Loaded { runs: RunSummary[]; details: RunDetail[] }
+interface StepAgg { usd: number; elapsedMs: number; restarts: number; spans: number }
+
+export function aggregate({ runs, details }: Loaded) {
+  const sum = (f: (r: RunSummary) => number) => runs.reduce((a, r) => a + f(r), 0);
+  const spans = details.flatMap((d) => d.spans);
+
+  const byStep = new Map<string, StepAgg>();
+  for (const s of spans) {
+    const e = byStep.get(s.name) ?? { usd: 0, elapsedMs: 0, restarts: 0, spans: 0 };
+    e.spans += 1;
+    e.usd += s.cost?.usd ?? 0;
+    e.elapsedMs += s.elapsedMs ?? 0;
+    e.restarts += s.restarts;
+    byStep.set(s.name, e);
   }
-  return [...byId.values()].sort((a, b) => b.runs.length - a.runs.length);
+
+  const interventions = details.flatMap((d) => d.interventions);
+  return {
+    runs, details, byStep,
+    usd: sum((r) => r.cost.usd),
+    failedUsd: sum((r) => r.cost.failedUsd),
+    supersededUsd: sum((r) => r.cost.supersededUsd),
+    elapsedMs: sum((r) => r.durations.elapsedMs),
+    workingMs: sum((r) => r.durations.workingMs),
+    // Parked time comes from each RUN's own decomposition, never from summing
+    // intervention durations. Parks overlap and an open one grows without bound, so
+    // that sum reaches 424h against 100h of wall clock — two ways of counting the
+    // same thing, only one of which can be added to the terms beside it.
+    parkedMs: sum((r) => r.durations.parkedMs),
+    unaccountedMs: sum((r) => r.durations.unaccountedMs),
+    delivered: sum((r) => r.stepsDelivered),
+    blocked: sum((r) => r.stepsBlocked),
+    relaunches: sum((r) => r.spanRelaunches),
+    completionsBeyondFirst: sum((r) => r.retriedCompletions),
+    completed: runs.filter((r) => r.terminationCause === "completed").length,
+    running: runs.filter((r) => r.terminationCause === "running").length,
+    stopped: runs.filter((r) => r.terminationCause !== "completed" && r.terminationCause !== "running").length,
+    parks: interventions.length,
+    parksWithoutReason: interventions.filter((i) => i.sourceKind === "unknown").length,
+    silentNodes: sum((r) => r.cost.coverage.silent),
+    reportedNodes: sum((r) => r.cost.coverage.reported),
+    totalNodes: sum((r) => r.cost.coverage.total),
+    awaiting: sum((r) => r.awaitingYou.count),
+    longestWaitMs: Math.max(0, ...runs.map((r) => r.awaitingYou.sinceMs ?? 0)),
+  };
 }
 
-/** A figure that is exact, at the size its magnitude deserves. */
-function Figure({ value, label, tone }: { value: string; label: string; tone?: string }) {
-  return (
-    <div style={{ display: "grid", gap: "var(--sp-1)", minWidth: 0 }}>
-      <span
-        className="mono"
-        style={{ fontSize: "var(--fs-6)", fontWeight: 600, letterSpacing: -0.8, color: tone ?? "var(--text)", lineHeight: 1 }}
-      >
-        {value}
-      </span>
-      <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-        {label}
-      </span>
-    </div>
-  );
+export type Agg = ReturnType<typeof aggregate>;
+
+/**
+ * Three tones, not two — because the data distinguishes three things and the app
+ * already tells the reader so on another screen.
+ *
+ * A blocked span on a run the substrate killed is NOT a step that failed on its
+ * merits. The Runs list renders that cause in neutral, deliberately: it is a known
+ * Orca bug, attributed away from the reader, and red there would be telling him to
+ * act on something no action reaches. Rendering the same event red here would give
+ * one event two tones on two surfaces two clicks apart — and the surface he sees
+ * second would silently overrule the one that got it right.
+ *
+ * So red is reserved for a step that failed while Orca was working, which is the only
+ * kind of failure this screen can attribute to the workflow.
+ */
+function spanTone(status: string, killedBySubstrate: boolean): string {
+  if (status === "passed") return "var(--run)";
+  if (status === "running") return "var(--accent)";
+  if (status === "blocked" || status === "failed") {
+    return killedBySubstrate ? "var(--text-3)" : "var(--err)";
+  }
+  return "var(--text-4)";
 }
 
 /**
- * The typical run — the points, the median, or both.
+ * Runs down, steps across — the densest honest panel available.
  *
- * orca-d0's rule, and the reasoning is why it isn't just the gate table: `median`
- * clears at n>=5, but the gate exists to stop a summary REPLACING observations the
- * reader could otherwise see. Below thirteen runs they all fit on screen, so the
- * points are a census and cost nothing; above that they stop being readable and the
- * summary earns its place.
- *
- * No mean, at any n. The gate would allow one at eight, but these runs span 0.1h to
- * 51h — a 460x range — and a mean over that is a number no run resembles.
+ * Seven runs by eight steps is fifty-six cells, every one an observed outcome. It
+ * also makes "every run stopped at Triage" visible as a SHAPE rather than as the same
+ * sentence repeated down a list, which is the difference between a reader noticing a
+ * pattern and a reader being told one.
  */
-const POINTS_STAY_VISIBLE_UPTO = 12;
-
-function TypicalRun({ rollup }: { rollup: Rollup }) {
-  const durations = rollup.runs.map((r) => r.durations.elapsedMs).sort((a, b) => a - b);
-  const n = durations.length;
-  if (n === 0) return null;
-  const medianAllowed = gateFor("median", n).meets;
-  const showPoints = n <= POINTS_STAY_VISIBLE_UPTO;
-
-  return (
-    <div style={{ display: "grid", gap: "var(--sp-2)" }}>
-      {medianAllowed ? (
-        <span className="mono" style={{ fontSize: "var(--fs-5)", fontWeight: 600 }}>
-          {dur(durations[Math.floor(n / 2)]!)}
-          <span style={{ fontSize: "var(--fs-1)", fontWeight: 400, color: "var(--text-3)" }}> median of {n}</span>
-        </span>
-      ) : (
-        <MeasurementLabel state="insufficient" have={n} need={gateFor("median", n).gate ?? 5} unit="runs" />
-      )}
-      {showPoints && (
-        <div style={{ display: "flex", gap: "var(--sp-3)", flexWrap: "wrap" }}>
-          {durations.map((d, i) => (
-            <span key={i} className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>{dur(d)}</span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+function RunStepMatrix({ agg }: { agg: Agg }) {
+  const columns: string[] = [];
+  for (const d of agg.details) for (const s of d.spans) if (!columns.includes(s.name)) columns.push(s.name);
+  const rows = agg.details.map((d) => ({
+    key: d.run.runId,
+    label: d.run.goalTitle,
+    sub: `v${d.run.templateVersion} · ${day(d.run.startedAt)}`,
+    cells: columns.map((c): MatrixCell | null => {
+      const s = d.spans.find((x) => x.name === c);
+      if (!s) return null;
+      const killed = d.run.terminationCause === "infrastructure_killed";
+      return {
+        key: s.workflowStepRunId,
+        tone: spanTone(s.status, killed),
+        title:
+          `${c} — ${killed && (s.status === "blocked" || s.status === "failed") ? "stopped by Orca" : s.status}` +
+          `, attempt ${s.attempt}${s.elapsedMs ? `, ${dur(s.elapsedMs)}` : ""}`,
+      };
+    }),
+  }));
+  if (columns.length === 0) return <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>No steps recorded.</span>;
+  return <Matrix columns={columns} rows={rows} />;
 }
 
-export function WorkflowCard({ rollup }: { rollup: Rollup }) {
-  const n = rollup.runs.length;
-  const parkedShare = rollup.elapsedMs > 0 ? Math.round((rollup.parkedMs / rollup.elapsedMs) * 100) : null;
+/**
+ * Per-step totals, each carrying the number of runs it was summed over.
+ *
+ * Without that denominator a two-run total is drawn against a seven-run total on one
+ * axis, and the longest bar reads as the slowest step when it may just be the one
+ * that ran in the runs that lasted longest. The totals row already carries the
+ * "dominated by the longest run" caveat for the same reason; the bars need it per bar
+ * because each has a different denominator.
+ */
+function stepBars(
+  agg: Agg,
+  pick: (v: StepAgg) => number,
+  fmt: (n: number) => string,
+  tone?: string,
+): BarItem[] {
+  return [...agg.byStep.entries()]
+    .map(([label, v]) => ({
+      key: label, label, value: pick(v),
+      display: `${fmt(pick(v))} · ${v.spans} ${v.spans === 1 ? "run" : "runs"}`,
+      tone,
+    }))
+    .filter((b) => b.value > 0)
+    .sort((a, b) => b.value - a.value);
+}
+
+export function Dashboard({ agg }: { agg: Agg }) {
+  const n = agg.runs.length;
+  const parkedShare = agg.elapsedMs > 0 ? Math.round((agg.parkedMs / agg.elapsedMs) * 100) : 0;
+  const rework = agg.failedUsd + agg.supersededUsd;
+  const cumulative = [...agg.runs].reverse().reduce<number[]>((acc, r) => {
+    acc.push((acc[acc.length - 1] ?? 0) + r.cost.usd);
+    return acc;
+  }, []);
 
   return (
-    <section style={{ display: "grid", gap: "var(--sp-5)" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-3)", flexWrap: "wrap" }}>
-        <h2 style={{ fontSize: "var(--fs-5)", fontWeight: 600, margin: 0, color: "var(--text)" }}>{rollup.name}</h2>
-        <span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
-          {n} {n === 1 ? "run" : "runs"} · {rollup.completed} completed · {rollup.stopped} stopped by Orca
-          {rollup.running > 0 ? ` · ${rollup.running} still running` : ""}
-        </span>
+    <div style={{ display: "grid", gap: "var(--sp-5)", alignContent: "start" }}>
+      {/* A strip, not a section. Open cards deserve the top of the page; a region
+          named after the reader's obligations reads as a to-do list. */}
+      {agg.awaiting > 0 && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)", flexWrap: "wrap", padding: "var(--sp-2) var(--sp-4)", background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 8 }}>
+          <span style={{ fontSize: "var(--fs-3)", fontWeight: 600 }}>
+            {agg.awaiting} {agg.awaiting === 1 ? "prompt is" : "prompts are"} waiting on you
+          </span>
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
+            — the oldest for {dur(agg.longestWaitMs)}
+          </span>
+        </div>
+      )}
+
+      {/* Exactly one type size above the grid. If any panel reaches it the headline
+          stops being a headline — and the contrast between wall clock and working is
+          the thing that lands before a single label is read. */}
+      <div style={{ display: "flex", gap: "var(--sp-6)", flexWrap: "wrap", padding: "0 var(--sp-1)" }}>
+        <Big value={usd(agg.usd)} label={`spent across ${n} runs`} />
+        <Big value={dur(agg.elapsedMs)} label="wall clock" />
+        <Big value={dur(agg.workingMs)} label="Orca working" tone={TONE.working} />
+        <Big value={`${parkedShare}%`} label="waiting on you" tone={TONE.waiting} />
       </div>
 
-      {/* Sums, at full weight. Every one is exact — arithmetic over observed runs,
-          with no sampling distribution to hedge. Loud where exact, quiet where not. */}
-      <div style={{ display: "flex", gap: "var(--sp-6)", flexWrap: "wrap" }}>
-        <Figure value={usd(rollup.usd)} label="spent across these runs" />
-        <Figure value={dur(rollup.elapsedMs)} label="wall clock" />
-        <Figure value={dur(rollup.workingMs)} label="orca working" tone="var(--run)" />
-        <Figure
-          value={parkedShare == null ? dur(rollup.parkedMs) : `${parkedShare}%`}
-          label="waiting on you"
-          tone="var(--accent-2)"
-        />
+      <div style={gridStyle}>
+        <SectionHeading>What happened</SectionHeading>
+
+        <Panel title="Runs by state" span={4}>
+          {/* Not "how they ended". A run still in flight has not ended, and placing it
+              in a termination partition asserts a terminal outcome about something
+              unfinished — so the partition is over STATE, which every run has. */}
+          <SplitBar
+            total={n}
+            parts={[
+              { label: "completed", value: agg.completed, display: String(agg.completed), tone: TONE.working },
+              { label: "stopped by Orca", value: agg.stopped, display: String(agg.stopped), tone: TONE.byOrca },
+              { label: "still running", value: agg.running, display: String(agg.running), tone: TONE.live },
+            ].filter((p) => p.value > 0)}
+          />
+        </Panel>
+
+        <Panel title="Steps across all runs" span={4}>
+          <CountRow
+            items={[
+              { label: "delivered", value: String(agg.delivered) },
+              { label: "blocked", value: String(agg.blocked) },
+              { label: "relaunched after a crash", value: String(agg.relaunches) },
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Completions beyond the first" span={4}>
+          {/* Not "retries". This counts step_complete emissions past the first, and a
+              veto-then-pass step emits two of them for ONE attempt — the same noun
+              that had a row claiming "attempt 1" and "redone 1x" simultaneously. */}
+          <CountRow items={[{ label: "across all runs", value: String(agg.completionsBeyondFirst) }]} />
+        </Panel>
+
+        <Panel title="Every run, every step" span={12}>
+          <RunStepMatrix agg={agg} />
+        </Panel>
+
+        <SectionHeading>Where the time went</SectionHeading>
+
+        <Panel title={`How ${dur(agg.elapsedMs)} of wall clock divides`} span={3}>
+          <SplitBar
+            total={agg.elapsedMs}
+            parts={[
+              { label: "Orca working", value: agg.workingMs, display: dur(agg.workingMs), tone: TONE.working },
+              { label: "waiting on you", value: agg.parkedMs, display: dur(agg.parkedMs), tone: TONE.waiting },
+              { label: "unaccounted", value: agg.unaccountedMs, display: dur(agg.unaccountedMs), tone: TONE.unseen },
+            ]}
+          />
+        </Panel>
+
+        <Panel title="How long each run took, by when it started" span={5}>
+          {/* A real over-time chart: both axes are observed. `startedAt` is a
+              timestamp and the duration is a measured span, so nothing is derived.
+              Unconnected on purpose — seven points joined is the trend claim refused
+              everywhere else — and date-spaced rather than index-spaced because the
+              clustering is real information: three runs in one evening and then a
+              five-day gap is a fact about how this gets used. */}
+          <Scatter
+            points={agg.runs.map((r) => ({
+              at: new Date(r.startedAt).getTime(),
+              value: r.durations.elapsedMs,
+              open: r.durations.accruing,
+              title: `${r.goalTitle} · ${day(r.startedAt)} · ${dur(r.durations.elapsedMs)}${r.durations.accruing ? " and counting" : ""}`,
+            }))}
+          />
+          <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+            {day(agg.runs[agg.runs.length - 1]!.startedAt)} — {day(agg.runs[0]!.startedAt)} · a hollow dot is still running, so its height is not final
+          </span>
+        </Panel>
+
+        <Panel title="Time by step, this window" span={4}>
+          <BarList items={stepBars(agg, (v) => v.elapsedMs, dur, TONE.waiting)} />
+        </Panel>
+
+        <SectionHeading>Where the money went</SectionHeading>
+
+        <Panel title="Spend by step, this window" span={5}>
+          <BarList items={stepBars(agg, (v) => v.usd, usd)} />
+        </Panel>
+
+        <Panel title="Spend per run, newest first" span={4}>
+          {/* Keyed and labelled by run, not by goal: two runs share the title
+              "Enable AI", which collided as a React key AND showed the reader one name
+              with two different figures. The Runs list already solves this with a date. */}
+          <BarList
+            items={agg.runs.map((r) => ({
+              key: r.runId,
+              label: `${r.goalTitle} · ${day(r.startedAt)}`,
+              value: r.cost.usd,
+              display: usd(r.cost.usd),
+            }))}
+          />
+        </Panel>
+
+        <Panel title="Cumulative spend, runs in order" span={3}>
+          <CumulativeLine values={cumulative} />
+          <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+            {n} runs · {usd(agg.usd)} total
+          </span>
+        </Panel>
+
+        <Panel title="Spend that produced nothing kept" span={12}>
+          <SplitBar
+            total={agg.usd}
+            parts={[
+              { label: "on attempts that failed", value: agg.failedUsd, display: usd(agg.failedUsd), tone: TONE.stopped },
+              { label: "on work that was replaced", value: agg.supersededUsd, display: usd(agg.supersededUsd), tone: "var(--warn)" },
+              { label: "on work that was kept", value: Math.max(0, agg.usd - rework), display: usd(Math.max(0, agg.usd - rework)), tone: TONE.working },
+            ]}
+          />
+        </Panel>
+
+        <SectionHeading>What we couldn&apos;t see</SectionHeading>
+
+        <Panel title="Cost coverage" span={4}>
+          {/* Two populations, and they are not the same one. `silent` spans emit no
+              completion at all, so they are absent from `reported`/`total` rather than
+              counted as unreported — which made "23 of 25" sit beside "6" and read as
+              29 of 25. The whole they belong to is stated so both can be placed. */}
+          <CountRow
+            items={[
+              { label: "of the nodes that can report, did", value: `${agg.reportedNodes} of ${agg.totalNodes}` },
+              { label: "more reported nothing at all", value: String(agg.silentNodes), tone: agg.silentNodes > 0 ? TONE.stopped : undefined },
+            ]}
+          />
+          <span style={{ fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+            {agg.totalNodes + agg.silentNodes} nodes ran in total.
+          </span>
+        </Panel>
+
+        <Panel title="Time we cannot account for" span={4}>
+          <Big value={dur(agg.unaccountedMs)} size="var(--fs-5)" label={`of ${dur(agg.elapsedMs)} wall clock`} tone={TONE.unseen} />
+        </Panel>
+
+        <Panel title="Pauses" span={4}>
+          {/* Two numbers rather than a breakdown by cause. `source_kind` is read from a
+              row overwritten as the activity advances, so a categorical split would be
+              confident about a corrupted field — and the corrupted rows are the ones
+              that look fine, showing another pause kind instead of falling through to
+              "unknown". */}
+          <CountRow
+            items={[
+              { label: "pauses recorded", value: String(agg.parks) },
+              { label: "with no reliable reason", value: String(agg.parksWithoutReason) },
+            ]}
+          />
+        </Panel>
       </div>
-
-      {/* The denominator says what it is made of.
-          A ratio of two exact sums over a fully-enumerated set is a FACT and needs no
-          gate — but it is dominated by the largest run, so it answers "where did my
-          time go in total" and NOT "what is a typical run like". Those are different
-          questions with different numbers, which is why no mean of per-run ratios
-          appears anywhere near it.
-          And most of these runs were killed by the substrate. For "where did the time
-          go" they legitimately count — the wall clock was real. For anything about how
-          the workflow behaves they do not, so the composition is stated rather than
-          left for the reader to assume. Without this it is the contamination finding
-          again, on a new surface. */}
-      <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)", maxWidth: "72ch", lineHeight: 1.5 }}>
-        Totals across all {n} {n === 1 ? "run" : "runs"}
-        {rollup.stopped > 0 ? `, ${rollup.stopped} of which Orca stopped before finishing` : ""}
-        {rollup.running > 0 ? `, and ${rollup.running} still running` : ""}. Dominated by the longest run,
-        so this is where your time went in total rather than what a single run looks like.
-      </span>
-
-      {/* The four terms must add up, and the reader can check that here as on the
-          ledger. That property is what makes the split falsifiable rather than
-          merely presented. */}
-      <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-2)", lineHeight: 1.5 }}>
-        {dur(rollup.elapsedMs)} = {dur(rollup.workingMs)} working + {dur(rollup.parkedMs)} waiting on you
-        {" + "}{dur(rollup.unaccountedMs)} unaccounted
-      </span>
-
-      <div style={{ display: "grid", gap: "var(--sp-2)" }}>
-        <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", letterSpacing: 0.6, textTransform: "uppercase" }}>
-          A typical run
-        </span>
-        <TypicalRun rollup={rollup} />
-      </div>
-    </section>
+    </div>
   );
 }
 
 export function WorkflowRollup() {
-  const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [data, setData] = useState<Loaded | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let live = true;
-    getRunSummaries().then((r) => { if (live) setRuns(r); }).catch(() => { if (live) setFailed(true); });
+    getRunSummaries()
+      .then(async (runs) => {
+        const details = await Promise.all(runs.map((r) => getRunDetail(r.runId).catch(() => null)));
+        if (live) setData({ runs, details: details.filter((d): d is RunDetail => d !== null) });
+      })
+      .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, []);
 
   if (failed) return <p style={{ fontSize: "var(--fs-3)", color: "var(--err)" }}>Couldn&apos;t load runs.</p>;
-  if (runs === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
+  if (data === null) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>;
+  if (data.runs.length === 0) return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
 
-  const rollups = rollupByWorkflow(runs);
-  if (rollups.length === 0) {
-    return <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>No workflow has run yet.</p>;
-  }
-
-  return (
-    <div style={{ display: "grid", alignContent: "start", gap: "var(--sp-6)" }}>
-      {rollups.map((r) => <WorkflowCard key={r.templateId} rollup={r} />)}
-    </div>
-  );
+  return <Dashboard agg={aggregate(data)} />;
 }
