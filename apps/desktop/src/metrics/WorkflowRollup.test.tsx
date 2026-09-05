@@ -386,6 +386,9 @@ describe("the harness's own choices reach the surface", () => {
           park({ activityId: "p1", sourceKind: "step_confirmation_pending", durationMs: 60_000, exitedAt: "x", open: false, parkState: "resolved" }),
           park({ activityId: "p2", sourceKind: "step_confirmation_pending", durationMs: 30_000, exitedAt: "x", open: false, parkState: "resolved" }),
           park({ activityId: "p3", sourceKind: "unknown", durationMs: 5_000, exitedAt: "x", open: false, parkState: "resolved" }),
+          // Abandoned on a dead run: its duration is the card's AGE, still growing,
+          // and must be counted but never summed.
+          park({ activityId: "p4", sourceKind: "step_confirmation_pending", durationMs: 400 * H, exitedAt: null, open: true, parkState: "abandoned" }),
         ] },
         { run: run({ runId: "live" }), spans: [], toolDecisions: [], interventions: [
           park({ activityId: "p9", sourceKind: "provider_recovery_pending", durationMs: 999 * H }),
@@ -393,12 +396,13 @@ describe("the harness's own choices reach the surface", () => {
       ],
     });
     expect([...a.parksByKind.entries()]).toEqual([
-      ["step_confirmation_pending", { count: 2, totalMs: 90_000, longestMs: 60_000 }],
-      ["unknown", { count: 1, totalMs: 5_000, longestMs: 5_000 }],
+      ["step_confirmation_pending", { count: 3, totalMs: 90_000, longestMs: 60_000, abandoned: 1 }],
+      ["unknown", { count: 1, totalMs: 5_000, longestMs: 5_000, abandoned: 0 }],
     ]);
     const t = render(<Dashboard agg={a} />).container.textContent ?? "";
     expect(t).toContain("a step to confirm");
-    expect(t).toContain("2 pauses · 1m 30s in all · longest 1m 0s");
+    expect(t).toContain("3 pauses · 1m 30s in all · longest 1m 0s · 1 left unanswered when the run stopped");
+    expect(t).not.toContain("400h");
     expect(t).toContain("reason not kept");
     expect(t).not.toContain("provider recovery");
   });

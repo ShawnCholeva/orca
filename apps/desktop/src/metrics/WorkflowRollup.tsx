@@ -137,12 +137,22 @@ export function aggregate({ runs, details, gates = null }: Loaded) {
   }
   // The pauses by kind, over ended runs. Counts and sums of park LENGTHS — never a
   // share of wall clock, because parks overlap and the run's own split owns that.
-  const parksByKind = new Map<string, { count: number; totalMs: number; longestMs: number }>();
+  //
+  // Only pauses that ENDED are summed. A park still open on a dead run is
+  // abandoned, and its `durationMs` is the card's age — unclamped and growing —
+  // not time anyone spent waiting. Summing those produced "312h in all" against
+  // 49h of wall clock on the live data: the 424h-against-100h defect the parked
+  // total was built to avoid, back one panel over. They are counted, not summed.
+  const parksByKind = new Map<string, { count: number; totalMs: number; longestMs: number; abandoned: number }>();
   for (const iv of details.filter((x) => endedIds.has(x.run.runId)).flatMap((x) => x.interventions)) {
-    const e = parksByKind.get(iv.sourceKind) ?? { count: 0, totalMs: 0, longestMs: 0 };
+    const e = parksByKind.get(iv.sourceKind) ?? { count: 0, totalMs: 0, longestMs: 0, abandoned: 0 };
     e.count += 1;
-    e.totalMs += iv.durationMs;
-    e.longestMs = Math.max(e.longestMs, iv.durationMs);
+    if (iv.exitedAt === null) {
+      e.abandoned += 1;
+    } else {
+      e.totalMs += iv.durationMs;
+      e.longestMs = Math.max(e.longestMs, iv.durationMs);
+    }
     parksByKind.set(iv.sourceKind, e);
   }
   // Token traffic, with cache as its own term. The price map does not price cache,
@@ -720,7 +730,9 @@ export function Dashboard({ agg }: { agg: Agg }) {
                 key: kind,
                 label: kind === "unknown" ? "reason not kept" : PROMPT_KIND[kind as keyof typeof PROMPT_KIND] ?? kind,
                 value: p.totalMs,
-                display: `${p.count} ${p.count === 1 ? "pause" : "pauses"} · ${dur(p.totalMs)} in all · longest ${dur(p.longestMs)}`,
+                display: `${p.count} ${p.count === 1 ? "pause" : "pauses"}`
+                  + (p.count - p.abandoned > 0 ? ` · ${dur(p.totalMs)} in all · longest ${dur(p.longestMs)}` : "")
+                  + (p.abandoned > 0 ? ` · ${p.abandoned} left unanswered when the run stopped` : ""),
               }))}
           />
           {agg.parksByKind.has("unknown") && (
