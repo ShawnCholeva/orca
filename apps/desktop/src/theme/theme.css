@@ -103,6 +103,13 @@ body {
   margin: 0;
   background: var(--bg, #0B1020);
   color: var(--text, #E5EAF5);
+  /* The inherited default has to BE a step, or the scale doesn't govern the app:
+     53 elements were sitting at the legacy stylesheet's 14px, a size the scale
+     doesn't define, purely because nothing else set one.
+     Snapped to --fs-3 rather than widening the scale to include 14, because
+     13 / 14 / 15 as three adjacent steps is not a scale — it's the 2px drift the
+     scale was introduced to remove, and 15 is already carrying row titles. */
+  font-size: var(--fs-3);
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

@@ -2,6 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan } from "@orca/contracts";
 import { Dashboard, aggregate } from "./WorkflowRollup";
+import { Donut } from "./dashboard-panels";
 
 afterEach(cleanup);
 const H = 3_600_000;
@@ -33,7 +34,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     restarts: 2, completions: 1, stallRescues: 0,
     cost: { usd: 5, tokensIn: 1, tokensOut: 1, state: "reported" },
     tier: null, verifiers: null, refuteVerdict: null, conflicts: [],
-    outcomeStatus: "succeeded", failureCode: null, ...over,
+    outcomeStatus: "succeeded", failureCode: null, models: [], ...over,
   };
 }
 
@@ -82,8 +83,14 @@ describe("everything on the dashboard is a count or a sum", () => {
 
   it("partitions runs by STATE, so an unfinished run is not given a terminal outcome", () => {
     const a = aggregate({ ...loaded(), runs: [run(), run({ runId: "b", terminationCause: "running" })] });
-    expect(a.completed + a.stopped + a.running).toBe(2);
+    // The partition must stay EXHAUSTIVE across the split. "stopped" used to be one
+    // bucket defined as "not completed and not running", which quietly swallowed three
+    // causes under a label naming only one of them. Splitting it is only safe while
+    // the parts still sum to n — otherwise a run acquires no state at all and vanishes
+    // from a panel that claims to show every run.
+    expect(a.completed + a.killed + a.workflowFailed + a.stoppedUnknown + a.running).toBe(2);
     expect(a.running).toBe(1);
+    expect(a.killed).toBe(1);
   });
 });
 
@@ -96,22 +103,19 @@ describe("what the dashboard refuses to render", () => {
     expect(t).not.toMatch(/\/100\b/);
   });
 
-  it("counts pauses without splitting them by a cause we cannot trust", () => {
-    // `source_kind` is read from a row overwritten as the activity advances, so a
-    // categorical breakdown would be confident about a corrupted field — and the
-    // corrupted rows are the ones that look fine, showing another pause kind rather
-    // than falling through to "unknown".
-    const t = html();
-    expect(t).toContain("pauses recorded");
-    expect(t).toContain("with no reliable reason");
-    expect(t).not.toMatch(/question pending|step confirmation|provider recovery/i);
-  });
-
-  it("calls extra completions what they are, not retries", () => {
+  it("never calls a repeated step a retry, anywhere on the surface", () => {
     // A veto-then-pass step emits two step_completes for ONE attempt, which is how a
     // row came to claim "attempt 1" and "redone 1x" at the same time.
+    //
+    // The panel this guarded ("Completions beyond the first") was removed as
+    // unreadable — the founder could not say what it was for, which is a fair verdict
+    // on a figure needing three sentences of provenance. The VOCABULARY rule outlives
+    // it: the dashboard still counts crash relaunches, and "retries" is exactly the
+    // wrong noun for those too, for the same reason it was wrong here. So this keeps
+    // the half that still has a subject and drops the half that does not.
     const t = html();
-    expect(t).toContain("Completions beyond the first");
+    expect(t.length, "the dashboard rendered nothing, so absence proves nothing").toBeGreaterThan(0);
+    expect(t).toContain("relaunches after a crash");
     expect(t).not.toMatch(/\bretries\b|\bredone\b/i);
   });
 });
@@ -147,3 +151,192 @@ describe("a denominator says what it counts", () => {
     expect(container.textContent).not.toContain("attempts across");
   });
 });
+
+describe("the step ring closes over steps, not over events", () => {
+  it("leaves relaunches out of the ring and totals only the step outcomes", () => {
+    // The fixture delivers 1, blocks 2 and relaunches 3. A ring drawn over all three
+    // would centre on 6, and 6 is not a number of anything: `spanRelaunches` counts
+    // crash events, so a step that crashed twice and then delivered is inside both
+    // `delivered` and `relaunches`. The ring must read 3 — and the relaunch count
+    // must still be on the panel, in its own unit, rather than dropped to make the
+    // arithmetic work.
+    const { container } = render(<Dashboard agg={aggregate({ runs: [run()], details: [] })} />);
+    const ring = [...container.querySelectorAll("svg")].find((el) =>
+      el.getAttribute("aria-label")?.includes("delivered"));
+    expect(ring, "no ring carried the step slices").toBeTruthy();
+    expect(ring!.getAttribute("aria-label")).toBe("steps: 1 delivered, 2 blocked");
+    expect(ring!.textContent).toContain("3");
+    expect(ring!.textContent).not.toContain("6");
+    expect(container.textContent).toContain("relaunches after a crash");
+  });
+});
+
+describe("a ring with one slice is still a ring", () => {
+  it("draws a full circle when a single part holds everything", () => {
+    // The case that chose d3-shape over hand-rolled trig: with one part the arc's
+    // start and end land on the same coordinate, and naive path math emits a dot or
+    // nothing at all. It is also the case that means every run succeeded — so the
+    // degenerate render would arrive precisely when the news is good.
+    const { container } = render(
+      <Donut caption="runs" parts={[{ label: "completed", value: 7, display: "7", tone: "var(--ok)" }]} />);
+    const d = container.querySelector("path")?.getAttribute("d") ?? "";
+    expect(d, "a lone 100% slice drew no path").not.toBe("");
+    expect(d).toMatch(/A/);
+    expect(container.textContent).toContain("100%");
+  });
+});
+
+describe("unmeasured time is not idle time", () => {
+  it("keeps a step whose attempts never reported working time out of 'unaccounted'", () => {
+    // A span whose step never completed reports `workingMs: null`. Treating that as
+    // zero and subtracting puts the step's whole elapsed into "unaccounted", which
+    // states that Orca sat there doing nothing. On the founder's live data Verify and
+    // Critique are unmeasured in 2 of 2 attempts — two rows that would have read
+    // 100% idle when the truth is 100% unrecorded. Parked survives in those spans
+    // because it is built from intervals rather than from completions.
+    const a = aggregate({
+      runs: [run()],
+      details: [{
+        run: run(),
+        spans: [span({ workflowStepRunId: "s1", name: "Verify", workingMs: null,
+                       elapsedMs: 100_000, parkedMs: 30_000 })],
+        interventions: [],
+      }],
+    });
+    const v = a.byStep.get("Verify")!;
+    expect(v.unmeasuredSpans).toBe(1);
+    expect(v.unmeasuredMs).toBe(70_000);
+    expect(v.unaccountedMs, "unmeasured time leaked into unaccounted").toBe(0);
+    expect(v.parkedMs, "parked is known even when working is not").toBe(30_000);
+    // The four terms still add to the step's own elapsed.
+    expect(v.workingMs + v.parkedMs + v.unaccountedMs + v.unmeasuredMs).toBe(v.elapsedMs);
+
+    const { container } = render(<Dashboard agg={a} />);
+    expect(container.textContent).toContain("1 of 1 not recorded");
+  });
+
+  it("never draws a segment backwards when a span over-reports its own clock", () => {
+    // Two live spans already report working + parked ABOVE their elapsed. Unclamped,
+    // the remainder goes negative and the bar grows the wrong way — so the terms are
+    // clamped to keep them addable, which is what the whole duration vocabulary rests
+    // on. Asserting the precondition too: a fixture that did not over-report would
+    // pass this while proving nothing.
+    const over = span({ elapsedMs: 100_000, workingMs: 90_000, parkedMs: 50_000 });
+    expect((over.workingMs ?? 0) + (over.parkedMs ?? 0)).toBeGreaterThan(over.elapsedMs!);
+    const a = aggregate({ runs: [run()], details: [{ run: run(), spans: [over], interventions: [] }] });
+    const t = a.byStep.get("Triage")!;
+    expect(t.unaccountedMs).toBeGreaterThanOrEqual(0);
+    expect(t.workingMs + t.parkedMs + t.unaccountedMs + t.unmeasuredMs).toBe(t.elapsedMs);
+  });
+});
+
+describe("a ring centres on a figure, not on a raw sum", () => {
+  it("prints the caller's formatted total rather than the float behind it", () => {
+    // The component was written for counts, where String(sum) is the right answer.
+    // The first money caller put "75.279189" in the middle of the ring: the sum was
+    // correct and its presentation was not. Asserting the precondition too — a
+    // fixture whose parts happened to add to a round number would pass this while
+    // proving nothing.
+    const parts = [
+      { label: "kept", value: 19.42, display: "$19.42", tone: "var(--ok)" },
+      { label: "failed", value: 50.859189, display: "$50.86", tone: "var(--err)" },
+    ];
+    const raw = String(parts.reduce((a, p) => a + p.value, 0));
+    expect(raw, "fixture does not reproduce the defect").toMatch(/\.\d{3,}/);
+
+    const { container } = render(<Donut caption="spent" total="$70.28" parts={parts} />);
+    expect(container.textContent).toContain("$70.28");
+    expect(container.textContent).not.toContain(raw);
+  });
+});
+
+describe("every termination cause lands in exactly one slice", () => {
+  it("keeps the run-state partition exhaustive across all five causes", () => {
+    // One run per cause. If any cause fell through the filters the sum would be short,
+    // and the donut would silently show fewer runs than the window holds — the failure
+    // mode the old single "stopped" bucket was one relabel away from.
+    const causes = ["completed", "running", "infrastructure_killed", "workflow_failed", "unknown"] as const;
+    const a = aggregate({
+      runs: causes.map((c, i) => run({ runId: `r${i}`, terminationCause: c })),
+      details: [],
+    });
+    expect(a.completed + a.killed + a.workflowFailed + a.stoppedUnknown + a.running).toBe(causes.length);
+    expect([a.completed, a.running, a.killed, a.workflowFailed, a.stoppedUnknown]).toEqual([1, 1, 1, 1, 1]);
+  });
+});
+
+describe("the coverage matrix separates a missing sensor from a missing recording", () => {
+  it("keeps gates out of the matrix and reports them as ran-but-unrecorded", () => {
+    // Clarify completes and fires nothing: a wiring gap, fixable by adding a sensor.
+    // A gate ran and PASSED while emitting no transitions: an instrumentation gap,
+    // fixable by emission. Rendering the gate as a 0/0 row beside Clarify's 0/2 would
+    // tell the reader to wire a sensor onto something already working.
+    const a = aggregate({
+      runs: [run()],
+      details: [{
+        run: run(),
+        spans: [
+          span({ workflowStepRunId: "s1", name: "Clarify", stepTemplateId: "clarify", kind: "step",
+                 completions: 1, verifiers: { executable: false, grounding: false, independentReview: false } }),
+          span({ workflowStepRunId: "s2", name: "Verify", stepTemplateId: "__gate__:verify", kind: "gate",
+                 status: "passed", completions: 0, workingMs: null, verifiers: null }),
+        ],
+        interventions: [],
+      }],
+    });
+    expect(a.byStep.get("Clarify")!.completed).toBe(1);
+    expect(a.byStep.get("Clarify")!.execChecks).toBe(0);
+    expect(a.byStep.get("Verify")!.gatesUnrecorded).toBe(1);
+    expect(a.byStep.get("Verify")!.completed, "a gate must contribute no matrix row").toBe(0);
+
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    // The gate's own row has moved off this surface — gate performance now comes from
+    // template metrics, in its own panel. What must not regress is the matrix
+    // POPULATION: a gate contributes no row, so it can never be read as a step whose
+    // sensors are missing, which is the confusion this test exists for.
+    expect(t, "Clarify's own row must still be counted").toContain("0/1");
+    expect(t, "the headline counts templates, and a gate is not one").toContain("0 of 1");
+  });
+});
+
+describe("a still-running run cannot move a total", () => {
+  it("sums over ended runs only, and keeps every run in the state partition", () => {
+    // A live run's elapsed and parked clocks are still accruing, so including it makes
+    // a total that changes on reload with nothing having happened. On the founder's
+    // data one open run carries 62 of 113 hours and sets the headline by itself.
+    // The run must still APPEAR — its state is a fact — it just cannot be summed.
+    const a = aggregate({
+      runs: [
+        run({ runId: "done", terminationCause: "completed", cost: { usd: 10, wastedUsd: 0, failedUsd: 0, supersededUsd: 0, coverage: { reported: 1, total: 1, silent: 0 }, rollupCheck: "matches" } }),
+        run({ runId: "live", terminationCause: "running", cost: { usd: 999, wastedUsd: 0, failedUsd: 0, supersededUsd: 0, coverage: { reported: 1, total: 1, silent: 0 }, rollupCheck: "matches" } }),
+      ],
+      details: [],
+    });
+    expect(a.usd, "the live run's spend leaked into the total").toBe(10);
+    expect(a.ended).toHaveLength(1);
+    // Still counted as a run, and still in the partition.
+    expect(a.runs).toHaveLength(2);
+    expect(a.completed + a.killed + a.workflowFailed + a.stoppedUnknown + a.running).toBe(2);
+    expect(a.running).toBe(1);
+  });
+
+  it("says out loud which runs the headline left out", () => {
+    // Excluding silently is the worse half: the figure would be stable and the reader
+    // would have no way to know a run was missing from it.
+    const a = aggregate({
+      runs: [run({ runId: "done" }), run({ runId: "live", terminationCause: "running" })],
+      details: [],
+    });
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("1 still running, not counted");
+  });
+
+  it("drops the exclusion clause when every run has ended", () => {
+    // The clause earns its place only when something was actually excluded; carrying
+    // "0 still running" on every window is noise that stops being read.
+    const a = aggregate({ runs: [run({ runId: "done" })], details: [] });
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).not.toContain("still running, not counted");
+  });
+});
+

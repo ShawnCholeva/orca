@@ -1,3 +1,5 @@
+import { arc, pie } from "d3-shape";
+import { Fragment } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 // Panel primitives for the Workflows dashboard.
@@ -13,15 +15,15 @@ import type { CSSProperties, ReactNode } from "react";
 // the nine-tenths of what we hold that never reached a surface.
 
 export function Panel({
-  title, span = 3, children, right,
-}: { title: string; span?: number; children: ReactNode; right?: ReactNode }) {
+  title, span = 3, children, right, center = false,
+}: { title: string; span?: number; children: ReactNode; right?: ReactNode; center?: boolean }) {
   return (
     <section
       style={{
         gridColumn: `span ${span}`, minWidth: 0,
         background: "var(--panel)", border: "1px solid var(--hairline)",
         borderRadius: 10, padding: "var(--sp-3) var(--sp-4)",
-        display: "grid", gap: "var(--sp-3)", alignContent: "start",
+        display: "grid", gridTemplateRows: "auto 1fr", gap: "var(--sp-3)", alignContent: "stretch",
       }}
     >
       <header style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)" }}>
@@ -31,7 +33,15 @@ export function Panel({
         <span style={{ flex: 1 }} />
         {right}
       </header>
-      {children}
+      {/* Panels in a row are equal height, so a panel holding one figure stacks it at
+          the top and leaves every pixel of the difference in a block underneath —
+          which is what reads as "a lot of space". `center` takes up that slack.
+          It is opt-in rather than the default because centring a LIST breaks the
+          thing lists most need: two of them side by side stop sharing a first-row
+          baseline, and the shorter one drifts down by half the height difference. */}
+      <div style={{ display: "grid", alignContent: center ? "center" : "start", gap: "var(--sp-3)", minHeight: 0 }}>
+        {children}
+      </div>
     </section>
   );
 }
@@ -84,8 +94,15 @@ export interface BarItem { key?: string; label: string; value: number; display: 
  * than to a total, because the question is "which of these is big" and the widths are
  * a reading aid for numbers that are all printed anyway.
  */
-export function BarList({ items, tone = "var(--accent-2)" }: { items: BarItem[]; tone?: string }) {
-  const max = Math.max(...items.map((i) => i.value), 1);
+export function BarList({
+  items, tone = "var(--accent-2)", scaleTo,
+}: { items: BarItem[]; tone?: string; scaleTo?: number }) {
+  // Default: scale to the largest member, because the question is "which of these is
+  // big". `scaleTo` is for the other case — items that are PARTS OF A WHOLE, where
+  // scaling to the largest would draw the biggest part full-width and assert it was
+  // everything. A 72% share rendering as a full bar next to the text "72%" is the
+  // chart contradicting its own label.
+  const max = scaleTo && scaleTo > 0 ? scaleTo : Math.max(...items.map((i) => i.value), 1);
   if (items.length === 0) {
     return <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Nothing recorded.</span>;
   }
@@ -112,30 +129,220 @@ export function BarList({ items, tone = "var(--accent-2)" }: { items: BarItem[];
 export interface SplitPart { label: string; value: number; display: string; tone: string }
 
 /**
- * A composition of parts that must add up to a stated whole.
+ * A part-to-whole ring. Same contract as SplitBar and the same reason for it: the
+ * parts must BE the whole, so the reader can add the legend in front of us.
  *
- * The same property as the ledger's four duration terms: the reader can add the
- * legend in front of us. A composition whose parts don't sum is the thing worth
- * catching, so the remainder is rendered rather than absorbed.
+ * A pie makes a stronger claim than a bar — it asserts the slices are mutually
+ * exclusive AND exhaustive, because the ring closes. Feeding it overlapping counts
+ * draws a circle whose total corresponds to nothing, so `caption` names the
+ * population out loud and the centre shows the sum the slices actually make.
+ *
+ * d3-shape rather than hand-rolled arcs for one specific case: a single part at 100%.
+ * Naive start/end trig puts both arc endpoints on the same coordinate and SVG draws
+ * nothing — and "every run completed" is the HEALTHY case, so the degenerate render
+ * would land exactly when the news is good.
  */
-export function SplitBar({ parts, total, height = 10 }: { parts: SplitPart[]; total: number; height?: number }) {
-  const sum = parts.reduce((a, p) => a + p.value, 0);
-  const scale = total > 0 ? total : sum || 1;
+export function Donut({
+  parts, caption, size = 128, total,
+}: { parts: SplitPart[]; caption: string; size?: number; total?: string }) {
+  const shown = parts.filter((p) => p.value > 0);
+  const sum = shown.reduce((a, p) => a + p.value, 0);
+  // Counts print themselves; anything else must not. This was written for runs and
+  // steps, and the first non-integer caller put "75.279189" in the middle of the ring
+  // — the sum was right, the presentation of it was raw. `total` is how a caller that
+  // already knows the unit says so.
+  const middle = total ?? String(sum);
+  const r = size / 2;
+  const layout = pie<SplitPart>().value((d) => d.value).sortValues(null).padAngle(shown.length > 1 ? 0.02 : 0);
+  const shape = arc<{ startAngle: number; endAngle: number }>().innerRadius(r * 0.62).outerRadius(r).cornerRadius(1);
+
   return (
-    <div style={{ display: "grid", gap: "var(--sp-2)" }}>
-      <div style={{ display: "flex", height, borderRadius: 2, overflow: "hidden", background: "var(--hairline)" }}>
-        {parts.map((p) => (
-          <span key={p.label} style={{ width: `${(p.value / scale) * 100}%`, background: p.tone }} />
+    /* The legend FLEXES to the panel edge and its rows share one column grid. Left
+       to `flex-start` the ring hugged the left border and the legend stopped dead in
+       the middle of a 440px panel, so a third of every panel was empty and the two
+       elements read as unrelated. Columns are what make a legend look measured
+       rather than placed: swatch, label, then figures on a right-aligned rail so the
+       counts and shares stack into readable columns instead of ragging. */
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--sp-4)" }}>
+      {/* The ring centres in whatever the legend leaves, rather than pinning to the
+          panel's left border. `space-between` alone pushed it flush against the wall,
+          which read as a chart shoved aside to make room rather than as the panel's
+          subject. */}
+      <div style={{ flex: 1, display: "flex", justifyContent: "center", minWidth: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }} role="img"
+           aria-label={`${caption}: ${shown.map((p) => `${p.display} ${p.label}`).join(", ") || "none"}`}>
+        <g transform={`translate(${r},${r})`}>
+          {/* The track is drawn ONLY when there is nothing else to draw, where it makes
+              an empty window read as a measured zero rather than as a panel that
+              failed. Underneath real slices it did the opposite: "stopped by Orca" is
+              neutral grey by design, and a neutral slice on a grey track made the
+              largest category on the panel — 5 of 7 runs — read as unfilled ring.
+              The tone is right and survives; the surface beneath it was the problem,
+              which is a hazard a bar chart does not have and a ring does. */}
+          {sum === 0 && <circle r={r * 0.81} fill="none" stroke="var(--hairline)" strokeWidth={r * 0.38} />}
+          {layout(shown).map((a, i) => (
+            <path key={shown[i]!.label} d={shape(a) ?? undefined} fill={shown[i]!.tone}>
+              <title>{`${shown[i]!.display} ${shown[i]!.label} of ${middle} ${caption}`}</title>
+            </path>
+          ))}
+          <text textAnchor="middle" dy="-0.05em" className="mono"
+                style={{ fontSize: "var(--fs-5)", fontWeight: 600, fill: "var(--text)" }}>{middle}</text>
+          <text textAnchor="middle" dy="1.35em" style={{ fontSize: "var(--fs-1)", fill: "var(--text-3)" }}>{caption}</text>
+        </g>
+      </svg>
+      </div>
+      {/* Content-width columns, not a stretched label column. With the label on
+          `1fr` the legend spanned the gap and the words ended up marooned in the
+          middle with their own figures a panel-width away — the reader had to track
+          across empty space to pair "stopped by Orca" with 5. Sized to content and
+          pushed right by the flex, each label sits against its own numbers, and the
+          columns still line up across rows because that is what a grid does. */}
+      <div style={{
+        display: "grid", gridTemplateColumns: "auto auto auto auto",
+        columnGap: "var(--sp-3)", rowGap: "var(--sp-3)", alignItems: "center",
+      }}>
+        {shown.map((p) => (
+          <Fragment key={p.label}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: p.tone }} />
+            <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>{p.label}</span>
+            <span className="mono" style={{ fontSize: "var(--fs-2)", fontWeight: 600, color: "var(--text)", textAlign: "right" }}>
+              {p.display}
+            </span>
+            {/* A share, only where it is a ratio of a closed set — which is what this
+                component refuses to be built out of anything else. */}
+            <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", textAlign: "right", minWidth: "3ch" }}>
+              {Math.round((p.value / sum) * 100)}%
+            </span>
+          </Fragment>
         ))}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-3)" }}>
-        {parts.map((p) => (
-          <span key={p.label} className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-2)", whiteSpace: "nowrap" }}>
-            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: p.tone, marginRight: 5, verticalAlign: -1 }} />
-            {p.display} {p.label}
+    </div>
+  );
+}
+
+export interface StackedRow { key: string; label: string; display: string; parts: SplitPart[] }
+
+/**
+ * One composition per row, each drawn to its OWN whole.
+ *
+ * The rows answer "inside this step, where did the time go", so every bar is
+ * full-width and the segments are shares of that step. Scaling the rows against each
+ * other instead would answer a different question — one `TIME BY STEP` already
+ * answers, two panels along.
+ *
+ * The legend is stated once, beneath, rather than repeated per row: four tones read
+ * eight times is noise, and the tones are the same four the wall-clock panel uses.
+ */
+export function StackedRows({ rows, legend }: { rows: StackedRow[]; legend: SplitPart[] }) {
+  if (rows.length === 0) {
+    return <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Nothing recorded.</span>;
+  }
+  return (
+    <div style={{ display: "grid", gap: "var(--sp-2)" }}>
+      {rows.map((r) => {
+        const total = r.parts.reduce((a, p) => a + p.value, 0) || 1;
+        return (
+          <div key={r.key} style={{ display: "grid", gap: 3 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)" }}>
+              <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {r.label}
+              </span>
+              <span style={{ flex: 1 }} />
+              <span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)", whiteSpace: "nowrap" }}>{r.display}</span>
+            </div>
+            <div style={{ display: "flex", height: 6, borderRadius: 2, overflow: "hidden", background: "var(--hairline)" }}>
+              {r.parts.filter((p) => p.value > 0).map((p) => (
+                <span
+                  key={p.label}
+                  title={`${r.label} · ${p.display} ${p.label}`}
+                  style={{ width: `${(p.value / total) * 100}%`, background: p.tone }}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-3)", paddingTop: "var(--sp-1)" }}>
+        {legend.map((p) => (
+          <span key={p.label} style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: p.tone }} />
+            {p.label}
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+export interface CoverageCell { fired: number; of: number }
+export interface CoverageRow { key: string; label: string; cells: CoverageCell[]; note?: string }
+
+/**
+ * Which checks fired, per step template, as fractions rather than a verdict.
+ *
+ * The fraction is the point. `0/7` and `7/7` are all-or-nothing and therefore describe
+ * WIRING — a property of the template, true regardless of how many runs there are.
+ * `6/7` describes CONDUCT, a sample of behaviour whose denominator has to be visible
+ * to be read at all. Printing both lets the reader tell configuration from behaviour
+ * without either being labelled, which no single collapsed number can do.
+ *
+ * Deliberately not a score, a grade or a tier. `tier` already exists in the contract
+ * and collapses these facets into one ordinal word — and it puts "sensors ran but did
+ * not cover it" and "nothing executed, grounding passed" both under
+ * `partially_verified`, which a reader takes as "about half verified".
+ */
+export interface CoverageColumn { label: string; hint: string }
+
+export function CoverageMatrix({
+  columns, rows, tone = "var(--ok)",
+}: { columns: CoverageColumn[]; rows: CoverageRow[]; tone?: string }) {
+  if (rows.length === 0) {
+    return <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Nothing recorded.</span>;
+  }
+  const grid: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: `minmax(0, 18rem) repeat(${columns.length}, minmax(84px, auto))`,
+    columnGap: "var(--sp-4)", rowGap: "var(--sp-2)", alignItems: "center",
+    // Capped, not stretched. On a full-width panel a `1fr` label column drove the
+    // figures to the far edge and left the step name marooned from its own numbers —
+    // the same gap that made the donut legends unreadable, in a grid this time.
+    maxWidth: "44rem",
+  };
+  return (
+    <div style={grid}>
+      <span />
+      {/* The header carries the definition, because the column names were the
+          contract's field names in a thin disguise — `executed`, `grounded`,
+          `model-reviewed` describe how the daemon classifies a check, not what the
+          reader learns from it. The visible label answers "what does this tell me",
+          and the tooltip carries the precision the label had to drop. */}
+      {columns.map((c) => (
+        <span key={c.label} title={c.hint} className="mono"
+              style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.6, textAlign: "right" }}>
+          {c.label}
+        </span>
+      ))}
+      {rows.map((r) => (
+        <Fragment key={r.key}>
+          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {r.label}
+            {r.note && <span style={{ color: "var(--text-3)", fontSize: "var(--fs-1)" }}> · {r.note}</span>}
+          </span>
+          {r.cells.map((c, i) => (
+            <span key={columns[i]!.label} style={{ display: "grid", gap: 3, justifyItems: "end" }}
+                  title={`${r.label} — ${columns[i]!.label}: ${c.fired} of ${c.of} completed attempts. ${columns[i]!.hint}`}>
+              <span className="mono" style={{ fontSize: "var(--fs-2)", color: c.fired === 0 ? "var(--text-3)" : "var(--text)" }}>
+                {c.fired}/{c.of}
+              </span>
+              {/* An empty track IS the finding, so the bar is always drawn: a missing
+                  bar would read as "no data" where the truth is "never fired". */}
+              <span style={{ width: 52, height: 3, borderRadius: 2, background: "var(--hairline)", overflow: "hidden" }}>
+                <span style={{ display: "block", width: `${c.of > 0 ? (c.fired / c.of) * 100 : 0}%`, height: "100%", background: tone }} />
+              </span>
+            </span>
+          ))}
+        </Fragment>
+      ))}
     </div>
   );
 }
@@ -160,204 +367,3 @@ export const gridStyle: CSSProperties = {
   gap: "var(--sp-3)",
   alignContent: "start",
 };
-
-export interface MatrixCell { key: string; tone: string; title: string; label?: string }
-
-/**
- * Runs × steps, one cell each.
- *
- * orca-d0's call and it is the densest honest panel available: 7 runs × 8 steps is
- * 56 cells, every one an observed outcome, with no estimate anywhere. It also makes
- * "every run stopped at Triage" visible as a SHAPE rather than as the same sentence
- * repeated down a list — which is the difference between a reader noticing a pattern
- * and a reader being told one.
- */
-export function Matrix({
-  columns, rows,
-}: {
-  columns: string[];
-  rows: { key: string; label: string; sub?: string; cells: (MatrixCell | null)[] }[];
-}) {
-  return (
-    <div style={{ display: "grid", gap: "var(--sp-1)", overflowX: "auto" }}>
-      <div style={{ display: "grid", gridTemplateColumns: `170px repeat(${columns.length}, minmax(52px, 1fr))`, gap: 3 }}>
-        <span />
-        {columns.map((c) => (
-          <span key={c} className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {c}
-          </span>
-        ))}
-      </div>
-      {rows.map((r) => (
-        <div key={r.key} style={{ display: "grid", gridTemplateColumns: `170px repeat(${columns.length}, minmax(52px, 1fr))`, gap: 3, alignItems: "center" }}>
-          <span style={{ fontSize: "var(--fs-1)", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {r.label}
-            {r.sub && <span className="mono" style={{ color: "var(--text-3)" }}> {r.sub}</span>}
-          </span>
-          {r.cells.map((c, i) => (
-            <span
-              key={i}
-              title={c?.title ?? "this step did not run"}
-              style={{
-                height: 22, borderRadius: 3, background: c?.tone ?? "transparent",
-                border: c ? "none" : "1px dashed var(--hairline-strong)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-            >
-              {c?.label && (
-                <span className="mono" style={{ fontSize: 9.5, color: "var(--bg)", fontWeight: 600 }}>{c.label}</span>
-              )}
-            </span>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * A running total across an ordered sequence, drawn as a line.
- *
- * Legitimate at n=7 where a trend line is not, and orca-d0's reasoning is what makes
- * it so: each point of a cumulative series is itself a SUM, so joining them asserts
- * nothing beyond what "cumulative" already means. A line through 7 independent
- * observations would be a trend claim; a line through 7 running totals is arithmetic.
- */
-export function CumulativeLine({ values, w = 240, h = 56, tone = "var(--accent-2)" }: { values: number[]; w?: number; h?: number; tone?: string }) {
-  if (values.length < 2) return null;
-  const max = values[values.length - 1] || 1;
-  const x = (i: number) => (i / (values.length - 1)) * (w - 4) + 2;
-  const y = (v: number) => h - 2 - (v / max) * (h - 6);
-
-  // A STEP function, not a smooth line. The steps are the runs and the flats are the
-  // stretches when nothing ran — both true. Smoothing would draw spend accruing
-  // between runs, which is money nobody spent: the curve would be inventing data in
-  // the gaps rather than describing them.
-  let d = `M${x(0).toFixed(1)},${y(values[0]!).toFixed(1)}`;
-  for (let i = 1; i < values.length; i++) {
-    d += ` L${x(i).toFixed(1)},${y(values[i - 1]!).toFixed(1)} L${x(i).toFixed(1)},${y(values[i]!).toFixed(1)}`;
-  }
-  return (
-    <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }}>
-      <path d={d} fill="none" stroke={tone} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      {values.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r="2" fill={tone} />)}
-    </svg>
-  );
-}
-
-export interface ScatterPoint { at: number; value: number; title: string; open?: boolean }
-
-/**
- * One dot per run: when it started against how long it took.
- *
- * Unconnected, deliberately — the n>=12 line gate stands, and seven points joined
- * would be the trend claim we refuse everywhere else. Both axes are observed:
- * `startedAt` is a timestamp and the duration is a measured span, so nothing here is
- * derived.
- *
- * Date-spaced rather than index-spaced, because the clustering is real information —
- * three runs in one evening and then a five-day gap is a fact about how the product
- * gets used, and index spacing would erase it.
- *
- * A run still in flight is marked hollow: its duration is not final and would grow on
- * every render, so a solid dot would assert a settled value that keeps moving.
- */
-export function Scatter({ points, w = 240, h = 90, tone = "var(--accent-2)" }: { points: ScatterPoint[]; w?: number; h?: number; tone?: string }) {
-  if (points.length === 0) return null;
-  const ats = points.map((p) => p.at);
-  const t0 = Math.min(...ats);
-  const t1 = Math.max(...ats);
-  const maxV = Math.max(...points.map((p) => p.value), 1);
-  const x = (at: number) => (t1 === t0 ? w / 2 : ((at - t0) / (t1 - t0)) * (w - 12) + 6);
-  const y = (v: number) => h - 8 - (v / maxV) * (h - 16);
-  return (
-    <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }}>
-      <line x1="0" y1={h - 4} x2={w} y2={h - 4} stroke="var(--hairline)" strokeWidth="1" />
-      {points.map((p, i) => (
-        <circle
-          key={i}
-          cx={x(p.at)} cy={y(p.value)} r="3.5"
-          fill={p.open ? "transparent" : tone}
-          stroke={tone} strokeWidth="1.5"
-        >
-          <title>{p.title}</title>
-        </circle>
-      ))}
-    </svg>
-  );
-}
-
-// ── Time series ──────────────────────────────────────────────────────────────
-
-/**
- * Daily counts where one series is a SUBSET of the other, drawn as nesting.
- *
- * Every failed session was also a started one, so a stacked chart would render
- * 56 + 30 = 86 and imply the two partition a total. They are nested, not additive.
- * Drawing the failures INSIDE the started bar makes the subset relationship the
- * visual grammar rather than something the reader has to be told — "on Sep 1, 14
- * started and 12 of them failed" reads straight off one bar.
- *
- * Bars rather than a line, deliberately: these are discrete bucket counts, and a
- * line interpolates between buckets, implying a continuity that a daily count does
- * not have. A zero-height bar is still a bucket — empty buckets arrive from the
- * server on purpose, because the difference between "nothing happened that day" and
- * "no bucket" is exactly what the renderer must not be left to invent.
- */
-export function NestedBars({
-  buckets, h = 120, outerTone = "var(--accent-2)", innerTone = "var(--err)",
-}: {
-  buckets: { at: number; total: number; subset: number; title: string }[];
-  h?: number;
-  outerTone?: string;
-  innerTone?: string;
-}) {
-  const max = Math.max(...buckets.map((b) => b.total), 1);
-  return (
-    <div style={{ display: "flex", gap: "var(--sp-2)", width: "100%" }}>
-      {/* A y-axis, because shape without magnitude is unreadable: the tallest bar
-          could be 6 or 16, and the day with the crash spike is the one where the
-          number matters most. Two ticks is enough for counts this small. */}
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", height: h, flexShrink: 0 }}>
-        <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", lineHeight: 1 }}>{max}</span>
-        <span className="mono" style={{ fontSize: "var(--fs-1)", color: "var(--text-3)", lineHeight: 1 }}>0</span>
-      </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: h, width: "100%", borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline)" }}>
-      {buckets.map((b) => (
-        <div
-          key={b.at}
-          title={b.title}
-          style={{
-            flex: 1, minWidth: 2, height: "100%",
-            display: "flex", flexDirection: "column", justifyContent: "flex-end",
-          }}
-        >
-          <div style={{ height: `${(b.total / max) * 100}%`, background: outerTone, borderRadius: "2px 2px 0 0", position: "relative", minHeight: b.total > 0 ? 2 : 0 }}>
-            {/* The subset, drawn inside its superset rather than beside or above it. */}
-            {b.subset > 0 && (
-              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${(b.subset / b.total) * 100}%`, background: innerTone, borderRadius: "0 0 2px 2px" }} />
-            )}
-          </div>
-        </div>
-      ))}
-      </div>
-    </div>
-  );
-}
-
-/** Axis ticks chosen by d3-time, so the labels stay sane whichever bucket the server picked. */
-export function TimeAxis({ ticks }: { ticks: { at: number; label: string; offsetPct: number }[] }) {
-  return (
-    <div style={{ position: "relative", height: 14 }}>
-      {ticks.map((t) => (
-        <span
-          key={t.at}
-          className="mono"
-          style={{ position: "absolute", left: `${t.offsetPct}%`, transform: "translateX(-50%)", fontSize: "var(--fs-1)", color: "var(--text-3)", whiteSpace: "nowrap" }}
-        >
-          {t.label}
-        </span>
-      ))}
-    </div>
-  );
-}

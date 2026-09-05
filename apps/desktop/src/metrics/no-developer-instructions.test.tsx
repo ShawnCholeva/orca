@@ -61,7 +61,7 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     elapsedMs: 120_000, workingMs: null, parkedMs: 0, status: "passed", blockedReason: null,
     restarts: 0, completions: 1, stallRescues: 0, cost: null, tier: null,
     verifiers: null, refuteVerdict: null, conflicts: [], outcomeStatus: "succeeded",
-    failureCode: null, ...over,
+    failureCode: null, models: [], ...over,
   };
 }
 
@@ -116,6 +116,16 @@ function readerFacingText(root: HTMLElement): { where: string; text: string }[] 
     if (label) out.push({ where: `aria-label on <${el.tagName.toLowerCase()}>`, text: label });
     const title = el.getAttribute("title");
     if (title) out.push({ where: `title on <${el.tagName.toLowerCase()}>`, text: title });
+    // An SVG <title> CHILD is a tooltip too, and it reached this collector only via
+    // textContent below — filed as "visible text", which is the one thing it is not.
+    // The mislabel hid behind the matrix panel's title attributes until that panel was
+    // removed and the precondition went red with every chart tooltip still in place.
+    // A collector that misnames a channel understates its own coverage, which is the
+    // quiet half of the same defect this file exists for.
+    if (el.tagName.toLowerCase() === "title" && el.textContent?.trim()) {
+      out.push({ where: `svg <title> in <${el.parentElement?.tagName.toLowerCase() ?? "?"}>`,
+                 text: el.textContent });
+    }
   }
   out.push({ where: "visible text", text: root.textContent ?? "" });
   return out;
@@ -137,10 +147,8 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   // Primitives: a number, a shape, a count. Their absence cases route through
   // MeasurementLabel, which the surfaces above exercise.
   aggregate: "a summing function, no output of its own",
-  Scatter: "circles with tooltips, supplied by the caller",
-  NestedBars: "bars with tooltips, supplied by the caller",
-  TimeAxis: "date labels from d3-time-format",
-  SessionFailures: "fetches its own series; renders only server-supplied label, placedBy and caveat text",
+  StackedRows: "segments with tooltips and a legend, all supplied by the caller",
+  CoverageMatrix: "fractions and bars in columns, all supplied by the caller",
   WorkflowRollup: "loads and delegates to Dashboard, which is asserted directly",
   // Dashboard panel primitives: each renders a number, a bar or a cell. The prose on
   // that surface is in Dashboard itself, which is asserted above.
@@ -148,10 +156,8 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   SectionHeading: "renders its children",
   Big: "a figure and a label supplied by the caller",
   BarList: "labels and bars supplied by the caller",
-  SplitBar: "a composition and its legend, supplied by the caller",
+  Donut: "slices, a centre total and a legend, all supplied by the caller",
   CountRow: "counts and labels supplied by the caller",
-  Matrix: "cells with tooltips, supplied by the caller",
-  CumulativeLine: "an svg path, no text",
   Figure: "a number and a label",
   Sample: "a count and its noun",
   StatTile: "a label and a figure; its absence renders via MeasurementLabel",
@@ -247,7 +253,8 @@ describe("no surface speaks to the reader about our backlog", () => {
       expect(strings.some((s) => s.text.trim().length > 0),
         `${name} produced no reader-facing text at all`).toBe(true);
       expect(
-        strings.some((s) => s.where.startsWith("aria-label") || s.where.startsWith("title")),
+        strings.some((s) => s.where.startsWith("aria-label") || s.where.startsWith("title") ||
+            s.where.startsWith("svg <title>")),
         `${name} produced nothing on a channel a screenshot cannot show. The defect this\n` +
           `file exists for lived in an aria-label and survived a day of verifying copy by\n` +
           `looking at pixels — so a surface with no accessible name and no tooltip is one\n` +
