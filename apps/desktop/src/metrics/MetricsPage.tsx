@@ -14,15 +14,23 @@ import { MeasurementLabel } from "./n-gate-ui";
 
 // Three views.
 //
+// DO NOT rename `rollup` to `workflows` to match its label. It is keyed differently
+// from what it displays ON PURPOSE, and the reason is a hazard rather than a taste:
+//
+//   `workflows` and `workflow` differ by one character, both satisfy this union, and
+//   a typo either way silently selects the wrong tab. TypeScript cannot help — both
+//   spellings are valid members — so the failure is a screen quietly showing the
+//   other view, with nothing red anywhere.
+//
+// The label collision is permanent: the founder has confirmed the tab stays
+// "Workflows", and the app's own chrome already has a `Workflows` tab. So the key
+// deliberately not matching its label is the only thing keeping that collision out of
+// the type system. `no-adjacent-view-keys.test.ts` enforces this; the comment is here
+// so the test failure makes sense rather than looking arbitrary.
+//
 // `workflow` is the ORIGINAL tab and is deliberately unchanged: a score and a letter
 // grade render there at any sample size, which is the defect `rollup` exists not to
-// repeat — but the instruction was to leave the old one intact, so it is untouched.
-//
-// The new one is keyed `rollup` rather than `workflows`, though its label is
-// "Workflows". `workflows` and `workflow` differ by one character, both satisfy the
-// union, and a typo either way would silently select the wrong tab with the compiler
-// content. The key names what the view IS — a rollup of a workflow's runs — which is
-// both unambiguous here and stable if the label changes again.
+// repeat — the instruction was to leave the old one intact, so it is untouched.
 type MetricsView = "runs" | "rollup" | "workflow";
 
 const PERIODS = ["24h", "7d", "30d"] as const;
