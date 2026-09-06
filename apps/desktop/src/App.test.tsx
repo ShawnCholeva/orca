@@ -29,6 +29,8 @@ const listGoalsMock = vi.fn();
 const openEventStreamMock = vi.fn();
 const getTemplateMetricsSummariesMock = vi.fn();
 const getTemplateMetricsDetailMock = vi.fn();
+// Nothing waiting unless a test says otherwise; App calls this on mount.
+const getRunSummariesMock = vi.fn().mockResolvedValue([]);
 
 vi.mock("./api", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./api")>();
@@ -40,6 +42,7 @@ vi.mock("./api", async (importOriginal) => {
     openEventStream: (...args: unknown[]) => openEventStreamMock(...args),
     getTemplateMetricsSummaries: (...args: unknown[]) => getTemplateMetricsSummariesMock(...args),
     getTemplateMetricsDetail: (...args: unknown[]) => getTemplateMetricsDetailMock(...args),
+    getRunSummaries: (...args: unknown[]) => getRunSummariesMock(...args),
   };
 });
 
@@ -382,5 +385,67 @@ describe("Goals rail workspace filter", () => {
     );
     const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
     expect(options).toEqual(["All workspaces", "Alpha"]);
+  });
+});
+
+describe("Goals rail waiting badge", () => {
+  const HOUR = 3_600_000;
+  const goals: GoalListItem[] = [
+    makeGoal({ id: "g-waiting", title: "Waiting Goal" }),
+    makeGoal({ id: "g-quiet", title: "Quiet Goal" }),
+  ];
+
+  beforeEach(() => {
+    fetchHealthMock.mockReset();
+    listAgentsMock.mockReset();
+    listGoalsMock.mockReset();
+    openEventStreamMock.mockReset();
+
+    fetchHealthMock.mockResolvedValue({ status: "ok" });
+    listAgentsMock.mockResolvedValue([makeAgent()]);
+    listGoalsMock.mockResolvedValue({ goals });
+    openEventStreamMock.mockReturnValue({ close: vi.fn() });
+    getRunSummariesMock.mockResolvedValue([{
+      runId: "r1", goalId: "g-waiting", goalTitle: "Waiting Goal",
+      templateId: "t", templateName: "Adaptive Delivery",
+      templateVersion: 16, status: "running",
+      startedAt: now, finishedAt: null,
+      blockedReason: null, terminationCause: "running", terminationEvidence: null,
+      durations: {
+        elapsedMs: 39 * HOUR, workingMs: HOUR, parkedMs: 38 * HOUR,
+        unaccountedMs: 0, spanActiveMs: 0, accruing: true, integrityFlag: null,
+      },
+      cost: {
+        usd: 1.6, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
+        coverage: { reported: 4, total: 4, silent: 0 }, rollupCheck: "not_applicable",
+      },
+      stepsDelivered: 5, stepsBlocked: 0, spanRelaunches: 5, retriedCompletions: 0,
+      openInterventions: 1,
+      progress: {
+        lastProgressAt: null, lastProgressChannel: null,
+        lastSignalAt: null, lastSignalChannel: null, silenceConclusive: true,
+      },
+      awaitingYou: { count: 1, sinceMs: 39 * HOUR, sourceKind: "step_confirmation_pending" },
+    }]);
+  });
+
+  it("flips a goal's status chip to WAITING and says what its run wants", async () => {
+    // The banner this replaced was persistent state, not a notification: visible for
+    // as long as something is waiting, gone the moment nothing is. The rail is on
+    // every screen, so the chip inherits that job. No dismiss control, by design.
+    render(
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>,
+    );
+    const rail = await screen.findByRole("complementary", { name: "Goals" });
+    const chip = await within(rail).findByText("waiting");
+    expect(chip).toHaveAttribute("title", "Waiting on you for 39h 0m · a step waiting for your OK");
+    expect(within(rail).queryByRole("button", { name: /dismiss|close|hide/i })).toBeNull();
+
+    // The quiet goal keeps its plain status.
+    const quiet = within(rail).getByText("Quiet Goal").closest("li")!;
+    expect(within(quiet).getByText("active")).toBeInTheDocument();
+    expect(within(quiet).queryByText("waiting")).toBeNull();
   });
 });

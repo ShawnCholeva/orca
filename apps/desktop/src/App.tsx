@@ -18,7 +18,7 @@ import { OnboardingView } from "./onboarding/OnboardingView";
 import { Titlebar } from "./chrome/Titlebar";
 import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
-import { WaitingOnYouBanner } from "./chrome/WaitingOnYouBanner";
+import { waitingByGoal, waitingLabel } from "./chrome/waiting-on-you";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
 import { inputStyle } from "./workflows/ScopeControls";
@@ -64,7 +64,7 @@ export default function App() {
     try {
       setRuns(await getRunSummaries());
     } catch {
-      // A failed poll leaves the previous answer standing. Blanking the banner on a
+      // A failed poll leaves the previous answer standing. Blanking the badge on a
       // transient 500 would say "nothing is waiting" when we simply don't know, and
       // a daemon restart happens here whenever anyone saves a file.
     }
@@ -206,9 +206,9 @@ export default function App() {
     return () => stream.close();
   }, [currentGoalId, refreshRuns]);
 
-  // "Is anything waiting on me" is app-level state, so it is fetched here rather
-  // than inside a screen — the whole failure was that the answer existed somewhere
-  // the reader had to navigate to.
+  // "Is anything waiting on me" is app-level state, so it is fetched here and shown
+  // on the goals rail, which is on every screen — the whole failure was that the
+  // answer existed somewhere the reader had to navigate to.
   //
   // The wake listeners are the point of the feature, not a nicety. The founder's two
   // long parks both happened with the laptop closed and sleeping, which suspends the
@@ -293,14 +293,12 @@ export default function App() {
   }
 
   const selectedGoal = goals.find((g) => g.id === selectedOrchestratorGoalId) ?? null;
+  const waiting = waitingByGoal(runs);
 
   return (
     <div className="app-shell">
       <Titlebar />
       {onboardingState === "complete" && <NoReadyAgentsBanner agents={agents} />}
-      {onboardingState === "complete" && (
-        <WaitingOnYouBanner runs={runs} onOpenGoal={(goalId) => { setSelectedOrchestratorGoalId(goalId); setActiveTab("orchestrator"); setMode("list"); }} />
-      )}
 
       {mode === "detail" && currentGoalId ? (
         <div className="main-content main-content--full">
@@ -358,6 +356,7 @@ export default function App() {
                   <GoalCard
                     key={goal.id}
                     goal={goal}
+                    waiting={waiting.get(goal.id) ?? null}
                     selected={goal.id === selectedOrchestratorGoalId}
                     onSelect={() => setSelectedOrchestratorGoalId(goal.id)}
                     onView={() => openGoalDetail(goal.id)}
@@ -540,11 +539,14 @@ export default function App() {
 
 function GoalCard({
   goal,
+  waiting = null,
   selected = false,
   onSelect,
   onView,
 }: {
   goal: Goal;
+  /** What this goal's run is waiting on the reader for, if anything. */
+  waiting?: RunSummary["awaitingYou"] | null;
   selected?: boolean;
   onSelect?: () => void;
   onView: () => void;
@@ -649,9 +651,15 @@ function GoalCard({
         <>
           <div className="goal-card-head">
             <span className="goal-card-title">{goal.title}</span>
-            <span className={`goal-card-status goal-card-status--${goal.status}`}>
-              {goal.status}
-            </span>
+            {waiting ? (
+              <span className="goal-card-status goal-card-status--waiting" title={waitingLabel(waiting)}>
+                waiting
+              </span>
+            ) : (
+              <span className={`goal-card-status goal-card-status--${goal.status}`}>
+                {goal.status}
+              </span>
+            )}
           </div>
           {truncated && <p className="goal-card-desc">{truncated}</p>}
           <time className="goal-card-meta mono" dateTime={goal.createdAt}>
