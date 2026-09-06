@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { MetricPeriod, MetricScope } from "@orca/contracts";
 import { getTemplateMetricsDetail, getTemplateMetricsSummaries } from "./usecases.js";
+import { listSessionIntervals } from "./sessions.js";
 import { getSampleDetail } from "./sample-detail.js";
 import { getRunDetail, getRunSummaries } from "./runs-usecases.js";
 import { computeTimeseries } from "./timeseries.js";
@@ -90,6 +91,19 @@ export function registerMetricsRoutes(server: FastifyInstance, deps: MetricsRout
         fromIso: from, toIso: to,
       }),
     };
+  });
+
+  // Session intervals overlapping a window. Facts, not a series: the desktop
+  // samples them on the reader's own window and step.
+  server.get("/v1/metrics/sessions", async (request, reply) => {
+    const q = request.query as { from?: string; to?: string };
+    const to = q.to ?? new Date().toISOString();
+    const from = q.from ?? new Date(Date.parse(to) - 30 * 86_400_000).toISOString();
+    if (!Number.isFinite(Date.parse(from)) || !Number.isFinite(Date.parse(to))) {
+      reply.status(400);
+      return { error: { code: "invalid_window", message: "from/to must be ISO timestamps" } };
+    }
+    return { sessions: listSessionIntervals(db, from, to) };
   });
 
   server.get("/v1/metrics/samples/:transitionId", async (request, reply) => {

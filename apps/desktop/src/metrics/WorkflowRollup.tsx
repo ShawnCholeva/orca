@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import type { MetricPeriod, RunDetail, RunSummary, TemplateMetricsDetail } from "@orca/contracts";
-import { getRunDetail, getRunSummaries, getTemplateMetricsDetail } from "../api";
+import type { MetricPeriod, RunDetail, RunSummary, SessionInterval, TemplateMetricsDetail } from "@orca/contracts";
+import { getRunDetail, getRunSummaries, getSessionIntervals, getTemplateMetricsDetail } from "../api";
 import { formatDuration } from "./interval-bar";
 import { PROMPT_KIND, modelName, terminatedRuns, tokens } from "./RunLedger";
 import { WorkflowDropdown, type WorkflowChoice } from "./StepPerformance";
 import {
-  BarList, Big, CountRow, CoverageMatrix, Donut, Panel, SectionHeading, StackedRows, TimeBars, gridStyle,
+  BarList, Big, CountRow, CoverageMatrix, Donut, Panel, SectionHeading, StackedRows, TimeBars, TimeLine, gridStyle,
   type BarItem, type CoverageRow, type StackedRow, type TimeBucket,
 } from "./dashboard-panels";
 
@@ -87,6 +87,13 @@ export interface Loaded {
   /** The chosen window and step — what the time panels are drawn with. Absent means no time panels. */
   window?: { fromMs: number; toMs: number } | null;
   intervalMs?: number;
+  /**
+   * Every session the harness had alive inside the window, across ALL workflows —
+   * a fact about the harness, not about the chosen workflow, and captioned so.
+   * Null while loading or if the fetch failed; the panel then says so rather than
+   * drawing a flat zero.
+   */
+  sessions?: SessionInterval[] | null;
 }
 interface StepAgg {
   usd: number; elapsedMs: number; restarts: number; spans: number; runIds: Set<string>;
@@ -119,7 +126,7 @@ interface StepAgg {
 
 export function aggregate({
   runs, details, gates = null, gatesCoverEveryVersion = false, gatesPeriod = "30d",
-  window = null, intervalMs = HOUR,
+  window = null, intervalMs = HOUR, sessions = null,
 }: Loaded) {
   // Sums are computed over runs that ENDED. A live run's elapsed and parked clocks are
   // still accruing, so including it makes a total that changes on reload with no work
@@ -315,7 +322,7 @@ export function aggregate({
 
   return {
     runs, ended, details, byStep, byModel, parksByKind, tokens: tokenSums, byVersion, verdicts, stops, stopsByReason, gates, gatesCoverEveryVersion, gatesPeriod,
-    harnessErrors, window, intervalMs,
+    harnessErrors, window, intervalMs, sessions,
     usd: sum((r) => r.cost.usd),
     failedUsd: sum((r) => r.cost.failedUsd),
     supersededUsd: sum((r) => r.cost.supersededUsd),
@@ -532,6 +539,43 @@ export function Dashboard({ agg }: { agg: Agg }) {
             behaves, and the one section that is about the harness rather than the
             workflow sits first. */}
         <SectionHeading>Harness</SectionHeading>
+
+        {agg.window !== null && (() => {
+          const window = agg.window;
+          const now = Date.now();
+          const live = (agg.sessions ?? []).filter((s) => s.endedAt === null).length;
+          return (
+            <Panel title="Active sessions" span={12}
+                   right={agg.sessions !== null && (
+                     <span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)" }}>
+                       {live} running now
+                     </span>
+                   )}>
+              {/* Sessions the harness had alive during each interval, across every
+                  workflow — the choosers above pick a workflow and a version, and this
+                  panel deliberately ignores both: the harness manages sessions, not
+                  workflows, and the count is only meaningful whole. The window and step
+                  still apply. */}
+              {agg.sessions === null ? (
+                <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Session records aren&apos;t available for this window.</span>
+              ) : (
+                <>
+                  <TimeLine
+                    buckets={activePerBucket(agg.sessions, bucketize([], window.fromMs, window.toMs, agg.intervalMs), now)}
+                    fromMs={window.fromMs}
+                    toMs={window.toMs}
+                    unit={{ one: "session active", many: "sessions active" }}
+                  />
+                  <p style={{ margin: 0, fontSize: "var(--fs-1)", color: "var(--text-3)" }}>
+                    Every session the harness ran, across all workflows — the workflow and version
+                    choosers do not filter this panel. A session counts in each interval it was alive in.
+                    Sessions of deleted workspaces are gone from the record and not here.
+                  </p>
+                </>
+              )}
+            </Panel>
+          );
+        })()}
 
         {/* WHEN the harness failed, one panel per kind, each a count per interval
             across the chosen window. Three kinds: a worker crashing and being
@@ -1006,6 +1050,19 @@ export function defaultIntervalFor(rangeKey: string): string {
  * padded. Every bucket the window touches is present, zeros included — a zero is
  * the observation that nothing happened.
  */
+/**
+ * How many of the intervals were alive at some point in each bucket. An overlap
+ * count rather than a sample at the boundary: sampled at midnight, a one-day step
+ * would miss every session that lived and died in daylight, and the count is the
+ * same closed-set count whatever the step.
+ */
+export function activePerBucket(
+  intervals: { startedAt: string; endedAt: string | null }[], buckets: TimeBucket[], nowMs: number,
+): TimeBucket[] {
+  const spans = intervals.map((i) => ({ s: Date.parse(i.startedAt), e: i.endedAt === null ? nowMs : Date.parse(i.endedAt) }));
+  return buckets.map((b) => ({ ...b, count: spans.filter((sp) => sp.s < b.endMs && sp.e >= b.startMs).length }));
+}
+
 export function bucketize(timesMs: number[], fromMs: number, toMs: number, intervalMs: number): TimeBucket[] {
   const origin = new Date(fromMs);
   origin.setHours(0, 0, 0, 0);
@@ -1064,6 +1121,20 @@ export function WorkflowRollup() {
   // while it still divides the new window; otherwise the default takes over.
   const [interval, setInterval] = useState<string | null>(null);
   const [gates, setGates] = useState<TemplateMetricsDetail | null>(null);
+  const [sessions, setSessions] = useState<SessionInterval[] | null>(null);
+
+  // Session intervals for the window, refetched when the window changes. Global —
+  // not keyed to the workflow — so this is the one fetch the choosers don't touch.
+  const rangeMs = RANGES.find((r) => r.key === range)!.ms;
+  useEffect(() => {
+    let live = true;
+    setSessions(null);
+    const to = new Date();
+    getSessionIntervals(new Date(to.getTime() - rangeMs).toISOString(), to.toISOString())
+      .then((s) => { if (live) setSessions(s); })
+      .catch(() => { if (live) setSessions(null); });
+    return () => { live = false; };
+  }, [rangeMs]);
 
   useEffect(() => {
     let live = true;
@@ -1162,8 +1233,9 @@ export function WorkflowRollup() {
       ) : (
         <Dashboard agg={aggregate({
           runs, details, gates, gatesCoverEveryVersion, gatesPeriod,
-          window: { fromMs: Date.now() - RANGES.find((r) => r.key === range)!.ms, toMs: Date.now() },
+          window: { fromMs: Date.now() - rangeMs, toMs: Date.now() },
           intervalMs: intervals.find((i) => i.key === chosenInterval)!.ms,
+          sessions,
         })} />
       )}
     </div>

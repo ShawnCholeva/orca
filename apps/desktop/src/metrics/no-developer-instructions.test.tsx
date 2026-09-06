@@ -159,6 +159,8 @@ const NOT_A_PROSE_SURFACE: Record<string, string> = {
   BarList: "labels and bars supplied by the caller",
   Donut: "slices, a centre total and a legend, all supplied by the caller",
   TimeBars: "a count per interval; the unit and hover text are the caller's",
+  TimeLine: "a level per interval; the unit and hover text are the caller's",
+  activePerBucket: "counts overlaps into intervals",
   CountRow: "counts and labels supplied by the caller",
   Figure: "a number and a label",
   Sample: "a count and its noun",

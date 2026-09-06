@@ -41,7 +41,41 @@ function seed(db: Database.Database) {
                 ?)`).run(recentEnd);
 }
 
+function seedSessions(db: Database.Database) {
+  db.prepare(`INSERT INTO workspaces (id,path,name,description,created_at,updated_at)
+              VALUES ('ws','/tmp/ws','ws','','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`).run();
+  const ins = db.prepare(`INSERT INTO sessions (id,goal_id,workspace_id,adapter_id,title,status,created_at,started_at,exited_at)
+                          VALUES (?,'g','ws','claude-code',?,?,?,?,?)`);
+  // Ended before the window, alive across it, started inside it, still running, and one that never started.
+  ins.run("before", "before", "exited", "2026-09-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z", "2026-09-01T01:00:00.000Z");
+  ins.run("across", "across", "exited", "2026-09-01T05:00:00.000Z", "2026-09-01T05:00:00.000Z", "2026-09-01T20:00:00.000Z");
+  ins.run("inside", "inside", "failed", "2026-09-01T12:00:00.000Z", "2026-09-01T12:00:00.000Z", "2026-09-01T12:30:00.000Z");
+  ins.run("live", "live", "running", "2026-09-01T13:00:00.000Z", "2026-09-01T13:00:00.000Z", null);
+  ins.run("never", "never", "failed", "2026-09-01T14:00:00.000Z", null, "2026-09-01T14:00:01.000Z");
+}
+
 afterEach(() => { closeDatabase(); for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+describe("GET /v1/metrics/sessions", () => {
+  it("returns every session alive at some point inside the window, as intervals", async () => {
+    const db = openTestDb(); seed(db); seedSessions(db);
+    const f = Fastify(); registerMetricsRoutes(f, { db });
+    const res = await f.inject({ method: "GET", url: "/v1/metrics/sessions?from=2026-09-01T10:00:00.000Z&to=2026-09-01T16:00:00.000Z" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { sessions: Array<{ sessionId: string; startedAt: string; endedAt: string | null }> };
+    expect(body.sessions.map((s) => s.sessionId)).toEqual(["across", "inside", "live", "never"]);
+    expect(body.sessions.find((s) => s.sessionId === "live")!.endedAt).toBeNull();
+    // A session that never reached `started_at` is dated by its creation.
+    expect(body.sessions.find((s) => s.sessionId === "never")!.startedAt).toBe("2026-09-01T14:00:00.000Z");
+  });
+
+  it("rejects a window that is not a pair of timestamps", async () => {
+    const db = openTestDb(); seed(db);
+    const f = Fastify(); registerMetricsRoutes(f, { db });
+    const res = await f.inject({ method: "GET", url: "/v1/metrics/sessions?from=yesterday" });
+    expect(res.statusCode).toBe(400);
+  });
+});
 
 describe("metrics routes", () => {
   it("GET /v1/metrics/templates returns a summary array", async () => {

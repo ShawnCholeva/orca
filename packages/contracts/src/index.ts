@@ -16,6 +16,7 @@ export * from "./harness/index.js";
 export * from "./metrics/index.js";
 export * from "./metrics/runs.js";
 export * from "./metrics/timeseries.js";
+export * from "./metrics/sessions.js";
 export * from "./learning/index.js";
 export * from "./adapters/ids.js";
 

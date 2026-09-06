@@ -2,7 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { z } from "zod";
 import {
-  RunSummary,
+  RunSummary, SessionInterval,
   RunDetail,
   AppSettings,
   type PutSettingsRequest,
@@ -2272,6 +2272,14 @@ export async function getTimeseries(
   const res = await fetch(`${baseUrl}/v1/metrics/timeseries?${q}`, { headers: authHeaders(token) });
   const body = await parseResponse(res, z.object({ timeseries: TimeseriesResponse }));
   return body.timeseries;
+}
+
+export async function getSessionIntervals(from: string, to: string): Promise<SessionInterval[]> {
+  const { baseUrl, token } = await loadConfig();
+  const q = new URLSearchParams({ from, to });
+  const res = await fetch(`${baseUrl}/v1/metrics/sessions?${q}`, { headers: authHeaders(token) });
+  const body = await parseResponse(res, z.object({ sessions: z.array(SessionInterval) }));
+  return body.sessions;
 }
 
 export async function getRunSummaries(limit = 50): Promise<RunSummary[]> {

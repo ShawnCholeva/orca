@@ -408,13 +408,7 @@ export function TimeBars({
   const gridlines: number[] = [];
   for (let n = stepY; n <= max; n += stepY) gridlines.push(n);
 
-  const intervalMs = buckets.length > 0 ? buckets[0]!.endMs - buckets[0]!.startMs : HOUR_MS;
-  const boundaries = buckets.map((b) => b.startMs).filter((t) => t >= fromMs);
-  const every = Math.max(1, Math.ceil(boundaries.length / 6));
-  const labelledStep = every * intervalMs;
-  const fmt = labelledStep >= DAY_MS
-    ? (intervalMs >= DAY_MS ? timeFormat("%b %d") : timeFormat("%b %d %H:%M"))
-    : timeFormat("%H:%M");
+  const axis = timeAxis(buckets, fromMs);
   const stamp = timeFormat("%b %d %H:%M");
 
   return (
@@ -442,23 +436,104 @@ export function TimeBars({
             </rect>
           );
         })}
-        {boundaries.map((t, i) => {
-          const tx = x(new Date(t));
-          const labelled = i % every === 0;
-          return (
-            <g key={t}>
-              <line x1={tx} x2={tx} y1={y(0)} y2={y(0) + (labelled ? 5 : 3)}
-                    stroke={labelled ? "var(--hairline-strong)" : "var(--hairline)"} />
-              {labelled && (
-                // A label near either edge anchors inward, so the last one is never
-                // clipped by the panel and the first never runs under the axis.
-                <text x={tx} y={height - 8} className="mono"
-                      textAnchor={tx > width - 40 ? "end" : tx < left + 24 ? "start" : "middle"}
-                      style={{ fontSize: 9, fill: "var(--text-3)" }}>{fmt(new Date(t))}</text>
-              )}
-            </g>
-          );
-        })}
+        <TimeAxisTicks axis={axis} x={(t) => x(new Date(t))} baseline={y(0)} labelY={height - 8} left={left} right={width - right} />
+      </svg>
+    </div>
+  );
+}
+
+/**
+ * The tick plan shared by every chart on a window: a tick on each bucket
+ * boundary inside the window, labels thinned to at most six, and a format that
+ * names the day once labelled ticks are a day or more apart.
+ */
+function timeAxis(buckets: TimeBucket[], fromMs: number) {
+  const intervalMs = buckets.length > 0 ? buckets[0]!.endMs - buckets[0]!.startMs : HOUR_MS;
+  const boundaries = buckets.map((b) => b.startMs).filter((t) => t >= fromMs);
+  const every = Math.max(1, Math.ceil(boundaries.length / 6));
+  const labelledStep = every * intervalMs;
+  const fmt = labelledStep >= DAY_MS
+    ? (intervalMs >= DAY_MS ? timeFormat("%b %d") : timeFormat("%b %d %H:%M"))
+    : timeFormat("%H:%M");
+  return { boundaries, every, fmt };
+}
+
+function TimeAxisTicks({ axis, x, baseline, labelY, left, right }: {
+  axis: ReturnType<typeof timeAxis>; x: (t: number) => number; baseline: number; labelY: number; left: number; right: number;
+}) {
+  return (
+    <>
+      {axis.boundaries.map((t, i) => {
+        const tx = x(t);
+        const labelled = i % axis.every === 0;
+        return (
+          <g key={t}>
+            <line x1={tx} x2={tx} y1={baseline} y2={baseline + (labelled ? 5 : 3)}
+                  stroke={labelled ? "var(--hairline-strong)" : "var(--hairline)"} />
+            {labelled && (
+              // A label near either edge anchors inward, so the last one is never
+              // clipped by the panel and the first never runs under the axis.
+              <text x={tx} y={labelY} className="mono"
+                    textAnchor={tx > right - 40 ? "end" : tx < left + 24 ? "start" : "middle"}
+                    style={{ fontSize: 9, fill: "var(--text-3)" }}>{axis.fmt(new Date(t))}</text>
+            )}
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * A level per interval across a window, drawn as steps: the count holds flat
+ * across its bucket and moves only at a boundary, because that is what "active
+ * during the interval" means — it is not sampled, so there is nothing between
+ * the points to interpolate. Zero is drawn as a line on the baseline, not as a
+ * gap: an interval with nothing active is an observation.
+ *
+ * Every bucket carries hover text; the invisible hit rect is the whole bucket's
+ * width, wider than the mark, so the reader does not have to hunt a 2px line.
+ */
+export function TimeLine({
+  buckets, fromMs, toMs, tone = "var(--accent)", unit,
+}: { buckets: TimeBucket[]; fromMs: number; toMs: number; tone?: string; unit: { one: string; many: string } }) {
+  const max = Math.max(...buckets.map((b) => b.count), 1);
+  const width = 960, height = 150;
+  const left = 28, right = 8, top = 10, bottom = 26;
+  const x = scaleTime().domain([new Date(fromMs), new Date(toMs)]).range([left, width - right]);
+  const plotH = height - top - bottom;
+  const y = (n: number) => top + plotH - (n / max) * plotH;
+  const stepY = Math.max(1, Math.ceil(max / 4));
+  const gridlines: number[] = [];
+  for (let n = stepY; n <= max; n += stepY) gridlines.push(n);
+  const axis = timeAxis(buckets, fromMs);
+  const stamp = timeFormat("%b %d %H:%M");
+  const px = (t: number) => x(new Date(Math.min(Math.max(t, fromMs), toMs)));
+  const path = buckets.map((b, i) =>
+    `${i === 0 ? "M" : "L"}${px(b.startMs).toFixed(1)},${y(b.count).toFixed(1)} L${px(b.endMs).toFixed(1)},${y(b.count).toFixed(1)}`).join(" ");
+  const total = buckets.reduce((a, b) => a + b.count, 0);
+
+  return (
+    <div>
+      <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img"
+           aria-label={`${unit.many} across ${buckets.length} intervals, peak ${max}`}
+           style={{ display: "block" }}>
+        {gridlines.map((n) => (
+          <g key={n}>
+            <line x1={left} x2={width - right} y1={y(n)} y2={y(n)} stroke="var(--hairline)" />
+            <text x={left - 6} y={y(n)} dy="0.35em" textAnchor="end" className="mono"
+                  style={{ fontSize: 9, fill: "var(--text-3)" }}>{n}</text>
+          </g>
+        ))}
+        <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} stroke="var(--hairline-strong)" />
+        {total > 0 && <path d={path} fill="none" stroke={tone} strokeWidth={2} strokeLinejoin="round" data-line="true" />}
+        {buckets.map((b) => (
+          <rect key={b.startMs} x={px(b.startMs)} y={top} width={Math.max(1, px(b.endMs) - px(b.startMs))} height={plotH}
+                fill="transparent" data-level={b.count}>
+            <title>{`${stamp(new Date(b.startMs))} → ${stamp(new Date(b.endMs))}: ${b.count} ${b.count === 1 ? unit.one : unit.many}`}</title>
+          </rect>
+        ))}
+        <TimeAxisTicks axis={axis} x={(t) => x(new Date(t))} baseline={y(0)} labelY={height - 8} left={left} right={width - right} />
       </svg>
     </div>
   );

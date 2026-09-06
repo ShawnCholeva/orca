@@ -1,14 +1,17 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Intervention, RunDetail, RunSummary, RunTraceSpan, TemplateMetricsDetail } from "@orca/contracts";
-import { Dashboard, RANGES, WorkflowRollup, aggregate, bucketize, defaultIntervalFor, gatePeriodFor, intervalsFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Intervention, RunDetail, RunSummary, RunTraceSpan, SessionInterval, TemplateMetricsDetail } from "@orca/contracts";
+import { Dashboard, RANGES, WorkflowRollup, activePerBucket, aggregate, bucketize, defaultIntervalFor, gatePeriodFor, intervalsFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
 import * as api from "../api";
-import { Donut, TimeBars } from "./dashboard-panels";
+import { Donut, TimeBars, TimeLine } from "./dashboard-panels";
 
 // Real timers restored here as well as in the tests: a failing assertion would
 // otherwise leave the next test on a faked clock, and useFakeTimers does not move
 // an already-faked clock, so the leak would be silent.
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
+// The session fetch is global and fires on every mount; unmocked it reaches for a
+// real daemon from inside the test DOM. Restored with the rest after each test.
+beforeEach(() => { vi.spyOn(api, "getSessionIntervals").mockResolvedValue([]); });
 const H = 3_600_000;
 
 function run(over: Partial<RunSummary> = {}): RunSummary {
@@ -849,5 +852,60 @@ describe("occurrences per interval", () => {
     expect(labels.length).toBeLessThanOrEqual(7);
     expect(labels[0]).toBe("Aug 30 00:00");
     expect(new Set(labels).size).toBe(labels.length);
+  });
+});
+
+describe("sessions the harness had alive", () => {
+  const H = 3_600_000;
+  const midnight = new Date(2026, 8, 1, 0, 0, 0).getTime();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const session = (startMs: number, endMs: number | null, id = "s"): SessionInterval =>
+    ({ sessionId: id, goalId: "g", adapterId: "claude-code", status: endMs === null ? "running" : "exited", startedAt: iso(startMs), endedAt: endMs === null ? null : iso(endMs) });
+
+  it("counts a session in every interval it overlapped, and a running one through to now", () => {
+    const buckets = bucketize([], midnight, midnight + 4 * H, H);
+    const now = midnight + 4 * H;
+    const levels = activePerBucket([
+      session(midnight + 30 * 60_000, midnight + 90 * 60_000, "a"),   // 00:30–01:30: buckets 0 and 1
+      session(midnight + 2 * H + 1, null, "b"),                       // 02:00 onward, still running
+      session(midnight - 10 * H, midnight - H, "c"),                  // ended before the window
+    ], buckets, now).map((b) => b.count);
+    expect(levels).toEqual([1, 1, 1, 1]);
+  });
+
+  it("draws the level as steps that hold across each bucket, with hover text per bucket", () => {
+    const buckets = bucketize([], midnight, midnight + 3 * H, H).map((b, i) => ({ ...b, count: [2, 0, 1][i]! }));
+    const { container } = render(<TimeLine buckets={buckets} fromMs={midnight} toMs={midnight + 3 * H} unit={{ one: "session active", many: "sessions active" }} />);
+    expect(container.querySelector("[data-line]")).toBeTruthy();
+    const hits = [...container.querySelectorAll("[data-level]")];
+    expect(hits.map((h) => h.getAttribute("data-level"))).toEqual(["2", "0", "1"]);
+    expect(hits[0]!.querySelector("title")?.textContent).toBe("Sep 01 00:00 → Sep 01 01:00: 2 sessions active");
+    // A zero is drawn on the baseline, never as a gap: the path still has three steps.
+    expect(container.querySelector("[data-line]")!.getAttribute("d")!.split("L").length).toBe(6);
+  });
+
+  it("sits in the Harness section, says it ignores the choosers, and shows the running count", () => {
+    const a = aggregate({
+      runs: [run({ terminationCause: "completed" })], details: [],
+      window: { fromMs: midnight, toMs: midnight + 24 * H }, intervalMs: H,
+      sessions: [session(midnight + H, null, "x"), session(midnight + H, midnight + 2 * H, "y")],
+    });
+    const { container } = render(<Dashboard agg={a} />);
+    const t = container.textContent ?? "";
+    expect(t).toContain("Active sessions");
+    expect(t).toContain("1 running now");
+    expect(t).toContain("do not filter this panel");
+    const headings = [...container.querySelectorAll("h2")].map((h) => h.textContent);
+    expect(headings[0]).toBe("Harness");
+  });
+
+  it("says the records are unavailable rather than drawing a flat zero when the fetch failed", () => {
+    const a = aggregate({
+      runs: [run({ terminationCause: "completed" })], details: [],
+      window: { fromMs: midnight, toMs: midnight + 24 * H }, intervalMs: H, sessions: null,
+    });
+    const t = render(<Dashboard agg={a} />).container.textContent ?? "";
+    expect(t).toContain("Session records aren't available");
+    expect(t).not.toContain("running now");
   });
 });
