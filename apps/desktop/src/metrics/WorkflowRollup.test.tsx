@@ -784,6 +784,10 @@ describe("when the harness failed", () => {
       ["2026-09-01T12:00:00.000Z", "run_killed"],
     ]);
     const { container } = render(<Dashboard agg={a} />);
+    // Under their own Harness heading, ahead of What happened.
+    const headings = [...container.querySelectorAll("h2")].map((h) => h.textContent);
+    expect(headings.indexOf("Harness")).toBe(0);
+    expect(headings.indexOf("Harness")).toBeLessThan(headings.indexOf("What happened"));
     // One panel per kind, each carrying its own total.
     expect(container.textContent).toContain("Worker crashes");
     expect(container.textContent).toContain("Failures inside the harness");

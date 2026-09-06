@@ -528,6 +528,38 @@ export function Dashboard({ agg }: { agg: Agg }) {
       </div>
 
       <div style={gridStyle}>
+        {/* The harness's own record leads. This page exists to show how the harness
+            behaves, and the one section that is about the harness rather than the
+            workflow sits first. */}
+        <SectionHeading>Harness</SectionHeading>
+
+        {/* WHEN the harness failed, one panel per kind, each a count per interval
+            across the chosen window. Three kinds: a worker crashing and being
+            relaunched, a completion failing with a code that names the substrate,
+            and the run being killed. A workflow veto is not here — that is the
+            workflow deciding. Split by kind rather than stacked, because the three
+            are different events with different remedies and a stack would invite
+            adding them. */}
+        {agg.window !== null && ([
+          { kind: "crash_relaunch", title: "Worker crashes", unit: { one: "relaunch after a crash", many: "relaunches after a crash" } },
+          { kind: "infra_failure", title: "Failures inside the harness", unit: { one: "failure", many: "failures" } },
+          { kind: "run_killed", title: "Runs stopped by the harness", unit: { one: "run stopped", many: "runs stopped" } },
+        ] as const).map(({ kind, title, unit }) => {
+          const times = agg.harnessErrors.filter((e) => e.kind === kind).map((e) => Date.parse(e.at));
+          const window = agg.window!;
+          return (
+            <Panel key={kind} title={title} span={4}
+                   right={<span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)" }}>{times.length}</span>}>
+              <TimeBars
+                buckets={bucketize(times, window.fromMs, window.toMs, agg.intervalMs)}
+                fromMs={window.fromMs}
+                toMs={window.toMs}
+                unit={unit}
+              />
+            </Panel>
+          );
+        })}
+
         <SectionHeading>What happened</SectionHeading>
 
         <Panel title="Runs by state" span={6}>
@@ -565,32 +597,6 @@ export function Dashboard({ agg }: { agg: Agg }) {
           </div>
         </Panel>
 
-        {/* WHEN the harness failed, one panel per kind, each a count per interval
-            across the chosen window. Three kinds: a worker crashing and being
-            relaunched, a completion failing with a code that names the substrate,
-            and the run being killed. A workflow veto is not here — that is the
-            workflow deciding. Split by kind rather than stacked, because the three
-            are different events with different remedies and a stack would invite
-            adding them. */}
-        {agg.window !== null && ([
-          { kind: "crash_relaunch", title: "Worker crashes", unit: { one: "relaunch after a crash", many: "relaunches after a crash" } },
-          { kind: "infra_failure", title: "Failures inside the harness", unit: { one: "failure", many: "failures" } },
-          { kind: "run_killed", title: "Runs stopped by the harness", unit: { one: "run stopped", many: "runs stopped" } },
-        ] as const).map(({ kind, title, unit }) => {
-          const times = agg.harnessErrors.filter((e) => e.kind === kind).map((e) => Date.parse(e.at));
-          const window = agg.window!;
-          return (
-            <Panel key={kind} title={title} span={4}
-                   right={<span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)" }}>{times.length}</span>}>
-              <TimeBars
-                buckets={bucketize(times, window.fromMs, window.toMs, agg.intervalMs)}
-                fromMs={window.fromMs}
-                toMs={window.toMs}
-                unit={unit}
-              />
-            </Panel>
-          );
-        })}
 
         {/* One row per harness revision. Pooling v13 with v16 hides the one
             comparison the page exists to support — whether the revision changed
