@@ -20,7 +20,6 @@ holds it. **Status: `open` unless stated.**
 
 | # | Issue | Status |
 |---|---|---|
-| B1 | `Triage 16/100 F` next to "Nothing failing this period" — score from step_run **status**, failure list from evidence **facets**. A crash loop through a quality lens. | Diagnosed; dissolved by redesign |
 | B2 | Score, tier and band computed over **three different populations** (n=4.5, n=1, n=1), rendered adjacently with no indication. | OPEN — rule recorded |
 | B3 | `trajectoryEfficiency` unit collision — mean tokens/transition, unnormalised, in a grid of 0..1 fractions, inverted sign. Renders `23103.596…`. | Adjudicated: redefine as wasted-spend ratio |
 | B4 | `recovery` and `replayability` don't measure their names. | Adjudicated: retire both |
@@ -29,8 +28,6 @@ holds it. **Status: `open` unless stated.**
 | B7 | `opacity: 0.55` as the entire response to low confidence. | Banned by spec |
 | B8 | `gate-metrics.ts` sums `tokens_in + tokens_out`, excluding cache — reports 11k for a step that moved 690k (60× understatement). | OPEN |
 | B9 | Gates emit **zero** harness transitions; every gate cost/latency field is structurally null. | OPEN — contract written |
-| B10 | `betaMean` would render **75%** for an observed 4-of-4. | Prevented — Wilson for display, test asserts it |
-| B11 | `3/n` rule of three overstates below n≈30; exact bound is `1 − 0.05^(1/n)` (53% at n=4, not 75%). | Fixed in spec + module |
 
 ## C. Metrics screen — UI defects found by driving it
 
