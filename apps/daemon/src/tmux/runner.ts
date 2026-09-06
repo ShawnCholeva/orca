@@ -27,7 +27,11 @@ export async function newSession(
 ): Promise<{ code: number }> {
   // tmux 3.0+: -e KEY=VAL sets the spawned process env without leaking into the server.
   const envArgs = Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  await r.run(["kill-session", "-t", name]); // idempotent
+  // Idempotent — but a name that was still live is a fact worth a line: it means
+  // a session was replaced under a reused name, which is one of the few ways an
+  // agent dies with no signal.
+  const replaced = await r.run(["kill-session", "-t", name]);
+  if (replaced.code === 0) console.warn(`[tmux] new-session replaced a live session ${name}`);
   const res = await r.run(["new-session", "-d", "-s", name, "-x", "220", "-y", "50", ...envArgs, "-c", cwd, command]);
   return { code: res.code };
 }
@@ -53,8 +57,14 @@ export async function pipePaneToFile(r: TmuxRunner, name: string, filePath: stri
   await r.run(["pipe-pane", "-o", "-t", name, `cat >> ${JSON.stringify(filePath)}`]);
 }
 
-export async function killSession(r: TmuxRunner, name: string): Promise<void> {
-  await r.run(["kill-session", "-t", name]);
+/**
+ * `reason` names the caller. Every worker death without an exit signal has had
+ * to be reconstructed from timestamps; a kill that actually removed a live
+ * session (exit 0) now says who asked for it.
+ */
+export async function killSession(r: TmuxRunner, name: string, reason = "unspecified"): Promise<void> {
+  const res = await r.run(["kill-session", "-t", name]);
+  if (res.code === 0) console.log(`[tmux] killed ${name} (${reason})`);
 }
 
 export async function hasSession(r: TmuxRunner, name: string): Promise<boolean> {

@@ -84,7 +84,7 @@ export async function reapOrphanTmuxSessions(r: TmuxRunner, db: Database.Databas
   for (const name of ours) {
     const keep = name.startsWith(WORKER_PREFIX) ? keepWorkers.has(name) : keepShadows.has(name);
     if (keep) continue;
-    await killSession(r, name);
+    await killSession(r, name, "boot reap: not kept for any active run");
     reaped.push(name);
   }
   return reaped;

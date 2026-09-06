@@ -358,11 +358,11 @@ export class WorkerSessionManager {
     return true;
   }
 
-  async terminate(sessionId: string): Promise<void> {
+  async terminate(sessionId: string, reason = "worker.terminate"): Promise<void> {
     const s = this.sessions.get(sessionId);
     this.sessions.delete(sessionId);
     this.stopTail(sessionId);
-    await killSession(this.tmux, s?.name ?? this.name(sessionId));
+    await killSession(this.tmux, s?.name ?? this.name(sessionId), reason);
     this.deps.markExited?.(sessionId);
   }
 

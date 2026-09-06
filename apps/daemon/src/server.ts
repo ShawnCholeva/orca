@@ -828,7 +828,7 @@ export function createServer(
     orchestratorMediator,
     workerDeliverFn,
     // workerTerminate
-    (sessionId) => workerSessions.terminate(sessionId),
+    (sessionId) => workerSessions.terminate(sessionId, "orchestrator: step ended or worker failed"),
     shadowSessions,
     // recoveryPromptComposer: keep the constructor default.
     undefined,
@@ -1034,7 +1034,7 @@ export function createServer(
       const runId = typeof event.payload.workflowRunId === "string" ? event.payload.workflowRunId : null;
       if (runId) {
         for (const sessionId of workerSessionIdsForRun(db, runId)) {
-          void workerSessions.terminate(sessionId).catch(() => {});
+          void workerSessions.terminate(sessionId, `run terminal event ${event.type}`).catch(() => {});
         }
         // The cards those workers raised die with the run. A Continue/Revise
         // card left `paused_for_input` on a blocked run renders controls that

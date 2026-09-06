@@ -134,7 +134,7 @@ export class ShadowSessionManager {
     ready.catch(() => {
       if (this.sessions.get(goalId) !== session) return;
       this.sessions.delete(goalId);
-      void killSession(this.tmux, name).catch(() => undefined);
+      void killSession(this.tmux, name, "shadow: startup failed, evicting").catch(() => undefined);
     });
     return shadowSessionId(goalId);
   }
@@ -359,7 +359,7 @@ export class ShadowSessionManager {
       p.reject(new Error(`shadow session for goal ${goalId} terminated`));
     }
     this.sessions.delete(goalId);
-    await killSession(this.tmux, session.name);
+    await killSession(this.tmux, session.name, "shadow.terminate");
   }
 
   protected getSession(goalId: string): Session | undefined { return this.sessions.get(goalId); }
