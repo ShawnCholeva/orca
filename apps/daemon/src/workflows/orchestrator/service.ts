@@ -581,11 +581,15 @@ export class OrchestratorService {
     if (!sess?.workflow_step_run_id) return;
     if (sess.status !== "running" && sess.status !== "starting") return;
 
-    // (2) Load step run; skip if not active.
+    // (2) Load step run; skip if not active — or already finished. A finished
+    // step's worker only trails status-line chatter, and reading a provider
+    // limit out of it parked a run on "recovery" a minute after its terminal
+    // step had completed, pre-empting the mark-done card; the run sat there
+    // for three days. Nothing on a finished step is the provider's to recover.
     const stepRun = db
       .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
       .get(sess.workflow_step_run_id) as StepRunRow | undefined;
-    if (!stepRun || stepRun.status !== "active") return;
+    if (!stepRun || stepRun.status !== "active" || stepRun.finished_at) return;
 
     // (3) Decode the full tail; provider terminal/turn parsing happens below.
     const tail = decodeSessionTail(this.sessionOutputStore.readTail(args.sessionId));

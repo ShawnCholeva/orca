@@ -9,6 +9,8 @@ import {
   openOrUpdateLive,
   pauseForConfirmation,
   pauseForProviderRecovery,
+  expireProviderRecovery,
+  pauseForMarkDone,
 } from "../activities/store.js";
 import { appendWorkflowEvent } from "./events.js";
 import { summarizeScoring } from "./orchestrator/scoring-summary.js";
@@ -240,6 +242,35 @@ export function reconcileWorkflowsOnBoot(db: Database, now: () => string): void 
           summary,
         }
       );
+    }
+  }
+
+  // A recovery checkpoint on a FINISHED step is stale: the step's work is done
+  // and the provider has nothing to recover. One was written when a usage
+  // warning on a completed worker's status line was read as a limit hit; it
+  // pre-empted the terminal step's mark-done card and the run sat parked for
+  // three days with a Retry that would only have spawned a worker to redo
+  // finished work. Clear it, expire its card, and put the mark-done card back
+  // if the completion recommendation is still open.
+  const staleRecovery = db
+    .prepare(
+      `SELECT ws.id AS step_run_id, ws.workflow_run_id, ws.goal_id,
+              (SELECT r.id FROM recommendations r
+                WHERE r.workflow_step_run_id = ws.id AND r.type = 'complete_workflow_run' AND r.status = 'proposed'
+                ORDER BY r.created_at DESC LIMIT 1) AS completion_rec
+       FROM workflow_step_runs ws
+       WHERE ws.pending_provider_recovery_json IS NOT NULL AND ws.finished_at IS NOT NULL`
+    )
+    .all() as { step_run_id: string; workflow_run_id: string; goal_id: string; completion_rec: string | null }[];
+  if (staleRecovery.length > 0) {
+    const bus = new EventBus();
+    for (const s of staleRecovery) {
+      db.prepare("UPDATE workflow_step_runs SET pending_provider_recovery_json = NULL WHERE id = ?").run(s.step_run_id);
+      expireProviderRecovery({ db, bus }, { stepRunId: s.step_run_id });
+      if (s.completion_rec) {
+        pauseForMarkDone({ db, bus }, { goalId: s.goal_id, workflowRunId: s.workflow_run_id, stepRunId: s.step_run_id, recommendationId: s.completion_rec });
+      }
+      console.log(`[reconcile] dropped a provider-recovery checkpoint from finished step ${s.step_run_id}${s.completion_rec ? " and restored its mark-done card" : ""}`);
     }
   }
 

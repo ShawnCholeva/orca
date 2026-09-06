@@ -150,8 +150,14 @@ export function ProviderRecoveryCard({ runId, recovery, onChanged }: ProviderRec
           ? `Available again at ${recovery.resetTimeText}`
           : "Reset time unavailable"}
       </p>
+      {/* Say what Wait does now: the control plane retries at the reset time.
+          "Preserved while waiting" read as "Orca will continue" before it did. */}
       <p className="provider-recovery-note">
-        The existing agent session and context will be preserved while waiting.
+        {recovery.mode === "waiting" && recovery.resetTimeText
+          ? `Orca will retry at ${recovery.resetTimeText}. The agent's session and context are kept until then.`
+          : recovery.resetTimeText
+            ? `Wait keeps the agent's session and context and retries by itself at ${recovery.resetTimeText}.`
+            : "The agent's session and context are kept while waiting; retry when the provider is available again."}
       </p>
       {recovery.lastError ? (
         <p role="alert" className="provider-recovery-error">

@@ -516,4 +516,55 @@ describe("reconcileWorkflowsOnBoot", () => {
     const blocked = db.prepare("SELECT id FROM events WHERE type='workflow.run.blocked'").all() as Array<{ id: string }>;
     expect(blocked).toHaveLength(0);
   });
+
+  it("drops a provider-recovery checkpoint from a FINISHED step and restores its mark-done card", () => {
+    // A usage warning on a completed worker's status line was read as a limit hit
+    // a minute after the terminal step finished; the recovery park pre-empted the
+    // mark-done card and the run sat parked for three days. A finished step has
+    // nothing for a provider to recover.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "orca-reconcile-stale-recovery-"));
+    tempDirs.push(dir);
+    const db = openDatabase(createConfig(dir));
+    runMigrations(db, defaultMigrationsDir());
+    db.prepare(
+      "INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at) VALUES ('goal-1', 'G', '', 'active', 1, ?, ?, NULL)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at) VALUES ('orca/engineering', 'Engineering', '', 1, 1, 1, '[]', '[]', ?, ?)"
+    ).run(NOW, NOW);
+    db.prepare(
+      "INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, current_step_run_id, blocked_reason, started_at, finished_at) VALUES ('run-1', 'goal-1', 'orca/engineering', 1, 'active', 'step-1', NULL, ?, NULL)"
+    ).run(NOW);
+    db.prepare(
+      "INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, satisfied_exit_criteria_json, outstanding_exit_criteria_json, blocked_reason, started_at, finished_at, fingerprint) VALUES ('step-1', 'goal-1', 'run-1', 'done', 5, 1, 'active', '[]', '[]', NULL, ?, ?, 'fp-1')"
+    ).run(NOW, NOW);
+    db.prepare(
+      "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = 'step-1'"
+    ).run(JSON.stringify({
+      id: "ckpt-1", mode: "choose", failureCode: "session_limit", message: "Claude Code session limit reached",
+      currentSessionId: "sess-1", currentAdapterId: "claude-code", currentProviderName: "Claude Code",
+      resetTimeText: null, resetAt: null, timezone: null, detectedAt: NOW, retryOutputSeq: null,
+      retryKind: "fresh_session", replacementSessionId: null, replacementOutputSeq: null,
+      pendingGuidance: [], lastError: null, choices: [],
+    }));
+    db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal, status, current_text, final_summary, source_kind, work_category, confidence, pending_question, created_at, updated_at, completed_at)
+       VALUES ('act-rec', 'goal-1', 'run-1', 'step-1', NULL, 0, 'paused_for_input', 'limit', NULL, 'provider_recovery_pending', NULL, NULL, NULL, ?, ?, NULL)`
+    ).run(NOW, NOW);
+    db.prepare(
+      `INSERT INTO recommendations (id, goal_id, type, status, source, title, rationale, proposed_action_json, confidence, sources_json, fingerprint, created_at, updated_at, workflow_step_run_id)
+       VALUES ('rec-1', 'goal-1', 'complete_workflow_run', 'proposed', 'deterministic_provider', 'Complete', 'done', '{}', 0.9, '[]', 'fp-rec', ?, ?, 'step-1')`
+    ).run(NOW, NOW);
+
+    reconcileWorkflowsOnBoot(db, () => NOW);
+
+    expect((db.prepare("SELECT pending_provider_recovery_json AS j FROM workflow_step_runs WHERE id = 'step-1'").get() as { j: string | null }).j).toBeNull();
+    const rows = db
+      .prepare("SELECT status, source_kind, recommendation_id FROM activities WHERE step_run_id = 'step-1' ORDER BY turn_ordinal")
+      .all() as { status: string; source_kind: string; recommendation_id: string | null }[];
+    expect(rows.find((r) => r.source_kind === "provider_recovery_pending")?.status).toBe("expired");
+    const markDone = rows.find((r) => r.source_kind === "mark_done_pending");
+    expect(markDone?.status).toBe("paused_for_input");
+    expect(markDone?.recommendation_id).toBe("rec-1");
+  });
 });

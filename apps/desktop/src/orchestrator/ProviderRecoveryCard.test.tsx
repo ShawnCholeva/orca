@@ -157,7 +157,8 @@ describe("ProviderRecoveryCard", () => {
         onChanged={vi.fn()}
       />,
     );
-    expect(screen.getByText(/existing agent session and context will be preserved/i)).toBeInTheDocument();
+    // The fixture carries a reset time, so Wait's promise is the timed retry.
+    expect(screen.getByText(/Orca will retry at 4:20am/)).toBeInTheDocument();
   });
 
   it("disables Retry when resetAt is in the future (preserved_session, waiting mode)", async () => {
@@ -316,5 +317,18 @@ describe("ProviderRecoveryCard", () => {
       });
       expect(onChanged).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("tells the reader that Wait retries by itself at the reset time", async () => {
+    const { ProviderRecoveryCard } = await import("./ProviderRecoveryCard");
+    const { unmount } = render(
+      <ProviderRecoveryCard runId="run-1" recovery={mkRecovery({ mode: "choose", resetTimeText: "1:50am (America/Chicago)" })} onChanged={vi.fn()} />,
+    );
+    expect(screen.getByText(/retries by itself at 1:50am/)).toBeInTheDocument();
+    unmount();
+    render(
+      <ProviderRecoveryCard runId="run-1" recovery={mkRecovery({ mode: "waiting", resetTimeText: "1:50am (America/Chicago)" })} onChanged={vi.fn()} />,
+    );
+    expect(screen.getByText(/Orca will retry at 1:50am/)).toBeInTheDocument();
   });
 });

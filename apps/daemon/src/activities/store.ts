@@ -885,6 +885,30 @@ export function expireConfirmation(
   return activity;
 }
 
+/** Expire a provider-recovery park that no longer applies (its step finished). */
+export function expireProviderRecovery(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const live = getLiveForStepRun(ctx.db, input.stepRunId);
+    if (live === undefined || live.sourceKind !== "provider_recovery_pending") return undefined;
+    const now = currentTime(ctx);
+    ctx.db
+      .prepare(
+        `UPDATE activities SET status = 'expired', pending_question = NULL, updated_at = ?, completed_at = ? WHERE id = ?`
+      )
+      .run(now, now, live.id);
+    const expired = getActivityById(ctx.db, live.id);
+    if (expired === undefined) throw new Error(`Activity disappeared: ${live.id}`);
+    event = insertActivityChangedEvent(ctx.db, expired, now);
+    return expired;
+  })();
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
 /**
  * Expire every live row of a run that has stopped.
  *
