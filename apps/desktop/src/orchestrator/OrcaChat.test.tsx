@@ -14,6 +14,7 @@ vi.mock("../theme/ThemeProvider", () => ({
 
 const confirmSplitMock = vi.fn();
 const confirmStepMock = vi.fn();
+const decideGateMock = vi.fn();
 const createOrchestratorMessageMock = vi.fn();
 const runGoalCommandMock = vi.fn();
 const getGoalDetailMock = vi.fn();
@@ -48,6 +49,7 @@ const resumeWorkflowRunMock = vi.fn();
 vi.mock("../api", () => ({
   confirmSplit: (...args: unknown[]) => confirmSplitMock(...args),
   confirmStep: (...args: unknown[]) => confirmStepMock(...args),
+  decideGate: (...args: unknown[]) => decideGateMock(...args),
   createOrchestratorMessage: (...args: unknown[]) => createOrchestratorMessageMock(...args),
   runGoalCommand: (...args: unknown[]) => runGoalCommandMock(...args),
   getGoalDetail: (...args: unknown[]) => getGoalDetailMock(...args),
@@ -215,6 +217,8 @@ describe("OrcaChat", () => {
     confirmSplitMock.mockResolvedValue(undefined);
     confirmStepMock.mockReset();
     confirmStepMock.mockResolvedValue(undefined);
+    decideGateMock.mockReset();
+    decideGateMock.mockResolvedValue(undefined);
     createOrchestratorMessageMock.mockReset();
     runGoalCommandMock.mockReset();
     getGoalDetailMock.mockReset();
@@ -424,6 +428,22 @@ describe("OrcaChat", () => {
 
     expect(await screen.findByPlaceholderText("Message Orca…")).toBeInTheDocument();
     expect(screen.queryByTestId("step-working")).toBeNull();
+  });
+
+  it("marks the step 'waiting on you' in the tracker (not 'running') when it awaits the user", async () => {
+    setupRunLoad();
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, awaitingUser: true,
+      },
+    });
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    expect(await screen.findByText("waiting on you")).toBeInTheDocument();
+    expect(screen.queryByText("running")).toBeNull();
   });
 
   it("still shows 'Working on {step}' in the opening gap when the agent has the next move", async () => {
@@ -1986,6 +2006,53 @@ describe("OrcaChat", () => {
     expect(await screen.findByTestId("split-choice")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Proposal" }));
     await waitFor(() => expect(confirmSplitMock).toHaveBeenCalledWith("run-1", "approach_only"));
+  });
+
+  it("reports no error when a gate decision's response is lost but the decision landed", async () => {
+    // The daemon commits the decision, then restarts before answering (a file
+    // save under tsx watch). The client used to render "Failed to submit gate
+    // decision." over a decision that took effect — inviting a second click.
+    const ts = new Date().toISOString();
+    const gateRun = {
+      id: "run-1", goalId: "goal-1", templateId: "orca/engineering", templateVersion: 1,
+      status: "active", currentStepRunId: null, currentNodeKind: "gate", currentNodeId: "critique",
+      startedAt: ts, finishedAt: null, blockedReason: null,
+      pendingGateReview: {
+        gateNodeId: "critique", recommendedOutcome: "approved", reasoning: null, reason: "Looks right.",
+        residualRisks: [], inputsConsidered: [], issueRefs: [],
+      },
+    };
+    getGoalDetailMock.mockResolvedValue({ goal: { ...goal, activeWorkflowRunId: "run-1" }, refinement: null, workspaces: [] });
+    getWorkflowRunMock
+      .mockResolvedValueOnce({ run: gateRun })
+      // After the lost response: the gate no longer awaits a human.
+      .mockResolvedValue({ run: { ...gateRun, pendingGateReview: null, currentNodeKind: "step", currentNodeId: "build" } });
+    getWorkflowTemplateMock.mockResolvedValue({
+      template: {
+        steps: [{ id: "design", ordinal: 0, name: "Design" }],
+        graph: {
+          nodes: [{ id: "design", type: "step", name: "Design" }, { id: "critique", type: "gate", name: "Critique" }],
+          edges: [{ from: "design", to: "critique" }],
+          positions: {},
+        },
+      },
+    });
+    listActivitiesMock.mockResolvedValue([
+      { ...activeActivity, id: "act-gate", stepRunId: null, status: "paused_for_input", sourceKind: "gate_decision_pending" },
+    ]);
+    listWorkflowDecisionsMock.mockResolvedValue({ decisions: [] });
+    listWorkflowRunArtifactsMock.mockResolvedValue({ artifacts: [] });
+    decideGateMock.mockRejectedValueOnce(new Error("socket hang up"));
+
+    const { OrcaChat } = await import("./OrcaChat");
+    render(<OrcaChat goals={[{ ...goal, activeWorkflowRunId: "run-1" }]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    fireEvent.click(await screen.findByTestId("gate-decision-approve"));
+    await waitFor(() => expect(decideGateMock).toHaveBeenCalledWith("run-1", "approved"));
+    // The projection was consulted and says the decision landed: no alarm.
+    await waitFor(() => expect(getWorkflowRunMock.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByText(/Failed to submit gate decision/)).toBeNull();
+    expect(screen.queryByText("socket hang up")).toBeNull();
   });
 
   it("shows a single 'Working on <gate>…' bubble while a gate reviewer runs", async () => {

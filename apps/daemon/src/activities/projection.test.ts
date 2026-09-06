@@ -434,6 +434,49 @@ describe("step_result confirmed-frame enrichment", () => {
     expect(a.stepResult?.successScore).toBe(0.82);
   });
 
+  it("rebuilt frame carries the evidence bundle and independent-check verdict the live card showed", () => {
+    // The live card read both from the completion stash, which confirming clears.
+    // They were also written to the step's step_complete transition — the
+    // append-only record — so the confirmed card must read them back from there
+    // rather than dropping them (a confirmed card said "Scores" under a live card
+    // that had said "Evidence").
+    insertExpiredConfirmation();
+    db.prepare(
+      `INSERT INTO harness_transitions (id, goal_id, workflow_run_id, workflow_step_run_id, boundary, evidence_json, refute_json, created_at)
+       VALUES ('ht1', 'g1', 'r1', 's1', 'step_complete', ?, ?, '2026-06-21T00:00:40.000Z')`
+    ).run(
+      JSON.stringify({
+        sensorsRun: [
+          { kind: "typecheck", command: "tsc", exitCode: 0, durationMs: 5, result: "passed", summary: "no type errors", artifactRef: null },
+        ],
+        verdict: "passed",
+        oracleAdequacy: { sufficient: true, gaps: [] },
+      }),
+      JSON.stringify({
+        verdict: "upheld",
+        triggered_by: ["high_risk"],
+        risk_class: "high",
+        reason: null,
+        issue_refs: [],
+        reasoning: "Checked the diff against the claims.",
+      })
+    );
+    const a = listActivitiesByGoal(db, "g1").find((x) => x.id === "a-res")!;
+    expect(a.confirmationSummary?.evidence?.executed).toBe(true);
+    expect(a.confirmationSummary?.evidence?.checks.map((c) => c.name)).toContain("typecheck");
+    expect(a.confirmationSummary?.refute).toEqual({ verdict: "upheld", reason: null, issueRefs: [] });
+  });
+
+  it("rebuilt frame omits the bundle when the step recorded no step_complete transition", () => {
+    // Pre-transition runs: nothing to read back, and inventing a "reasoning
+    // step" bundle would claim something the record does not hold.
+    insertExpiredConfirmation();
+    const a = listActivitiesByGoal(db, "g1").find((x) => x.id === "a-res")!;
+    expect(a.confirmationSummary).toBeDefined();
+    expect(a.confirmationSummary?.evidence).toBeUndefined();
+    expect(a.confirmationSummary?.refute ?? null).toBeNull();
+  });
+
   it("leaves an auto-completed step_result (no confirmation shown) compact", () => {
     // No expired step_confirmation_pending sibling.
     const a = listActivitiesByGoal(db, "g1").find((x) => x.id === "a-res")!;

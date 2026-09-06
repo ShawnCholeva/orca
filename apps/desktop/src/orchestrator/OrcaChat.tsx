@@ -674,7 +674,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   const activeStepRunning =
     workflowState.stepRun?.status === "active" &&
     workflowState.stepRun?.finishedAt == null &&
-    !awaitingStepConfirm;
+    !awaitingStepConfirm &&
+    // The step run's own "parked on the human" flag (a chat reply awaiting the
+    // user, a question, a permission). The stepper was not consuming it and
+    // pulsed "running" over a step whose next move was the reader's.
+    !awaitingUser;
   // The workflow has done all its work once the final step has passed. A truly
   // completed run detaches from the goal (active_workflow_run_id is nulled), so
   // the run we can still see here is parked on the passed terminal step. Treat
@@ -918,9 +922,28 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       await decideGate(runId, outcome);
       setRefreshNonce((current) => current + 1);
     } catch (err) {
+      // The daemon commits the decision before it answers, and a restart in
+      // between (any file save under `tsx watch`) loses only the answer. Ask the
+      // projection before reporting failure: an error over a decision that took
+      // effect invites a second submit. The daemon treats a re-decide as a no-op,
+      // so the harm is the false alarm, not a double route.
+      if (selectedGoalId && (await gateDecisionLanded(selectedGoalId, runId))) {
+        setRefreshNonce((current) => current + 1);
+        return;
+      }
       setActionError(toErrorMessage(err, "Failed to submit gate decision."));
     } finally {
       setDecidingGate(false);
+    }
+  }
+
+  /** True when the run no longer holds a gate decision for the human to make. */
+  async function gateDecisionLanded(goalId: string, id: string): Promise<boolean> {
+    try {
+      const { run } = await getWorkflowRun(goalId, id);
+      return run.pendingGateReview == null;
+    } catch {
+      return false;
     }
   }
 
@@ -1021,6 +1044,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           approving={approvingCompletion}
           awaitingGate={awaitingGate}
           awaitingConfirm={awaitingStepConfirm}
+          awaitingUser={awaitingUser}
           skippedIndices={skippedIndices}
           onViewWorkflows={onViewWorkflows}
         />

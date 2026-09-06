@@ -1571,6 +1571,26 @@ describe('goal refinement and workspace routes', () => {
     expect(body.preview.path).toBe(wsDir);
   });
 
+  it('POST /v1/workspaces/inspect names a registered folder by its registered name', async () => {
+    // The preview's name defaults to the folder's basename. Once the folder is in
+    // the registry, every surface that shows the preview (the create-goal flow's
+    // attached-workspace row) must show the name the user gave it, not the
+    // directory name — "Orca Scratch", not "orca-scratch".
+    await server.inject({
+      method: 'POST', url: '/v1/workspaces',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir, name: 'Orca Scratch' }
+    });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/v1/workspaces/inspect',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir }
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { preview: { name: string } }).preview.name).toBe('Orca Scratch');
+  });
+
   it('POST /v1/workspaces/inspect returns 400 with invalid_input for relative path', async () => {
     const res = await server.inject({
       method: 'POST',

@@ -7,6 +7,8 @@ import {
   appendActivityStep,
   completeLive,
   expireLive,
+  expireLiveForRun,
+  expireLiveOnStoppedRuns,
   getLiveForStepRun,
   getPausedForGoal,
   openOrUpdateLive,
@@ -527,5 +529,63 @@ describe("ActivityStore", () => {
   it("skips empty orchestrator reasoning", () => {
     const { ctx } = ctxFor(db);
     expect(recordOrchestratorReasoning(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", text: "  " })).toBeUndefined();
+  });
+
+  describe("a run that has stopped keeps no live card", () => {
+    function seedRun(id: string, status: string) {
+      db.prepare(
+        `INSERT OR IGNORE INTO workflow_templates (id, name, description, version, is_built_in, is_locked, steps_json, guardrails_json, created_at, updated_at)
+         VALUES ('tpl', 'T', '', 1, 0, 0, '[]', '[]', '2026-06-05', '2026-06-05')`
+      ).run();
+      // One goal per run: a goal holds at most one non-terminal run.
+      db.prepare(
+        `INSERT INTO goals (id, title, intent, status, autonomy_level, created_at, updated_at, archived_at)
+         VALUES (?, 't', '', 'active', 1, '2026-06-05', '2026-06-05', null)`
+      ).run(`goal-${id}`);
+      db.prepare(
+        `INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at)
+         VALUES (?, ?, 'tpl', 1, ?, '2026-06-05')`
+      ).run(id, `goal-${id}`, status);
+    }
+
+    it("expireLiveForRun expires every live row of the run and announces each", () => {
+      const { ctx, events } = ctxFor(db);
+      // A Continue/Revise card on one step and a worker mid-turn on another —
+      // the two shapes found orphaned on blocked runs (three cards, one tool_use).
+      pauseForConfirmation(ctx, { goalId: "g1", workflowRunId: "r1", stepRunId: "s1", summary: "Done?" });
+      openOrUpdateLive(ctx, { ...base, stepRunId: "s2", sourceKind: "tool_use", currentText: "Reading…", workCategory: "reading" });
+      // A live card on ANOTHER run must be left alone.
+      openOrUpdateLive(ctx, { ...base, workflowRunId: "r2", stepRunId: "s3", sourceKind: "tool_use", currentText: "…", workCategory: null });
+      events.length = 0;
+
+      const expired = expireLiveForRun(ctx, { workflowRunId: "r1" });
+
+      expect(expired.map((a) => a.status)).toEqual(["expired", "expired"]);
+      expect(getLiveForStepRun(db, "s1")).toBeUndefined();
+      expect(getLiveForStepRun(db, "s2")).toBeUndefined();
+      expect(getLiveForStepRun(db, "s3")?.status).toBe("active");
+      // One activity.changed per row, so the chat drops the controls at once.
+      expect(events.filter((e) => e.type === "activity.changed")).toHaveLength(2);
+      expect(expireLiveForRun(ctx, { workflowRunId: "r1" })).toEqual([]);
+    });
+
+    it("expireLiveOnStoppedRuns sweeps only runs that are no longer moving", () => {
+      const { ctx } = ctxFor(db);
+      seedRun("r-blocked", "blocked");
+      seedRun("r-done", "completed");
+      seedRun("r-live", "active");
+      seedRun("r-paused", "paused");
+      for (const [run, step] of [["r-blocked", "s1"], ["r-done", "s2"], ["r-live", "s3"], ["r-paused", "s4"]] as const) {
+        pauseForConfirmation(ctx, { goalId: `goal-${run}`, workflowRunId: run, stepRunId: step, summary: "Done?" });
+      }
+
+      expect(expireLiveOnStoppedRuns(ctx)).toBe(2);
+
+      expect(getLiveForStepRun(db, "s1")).toBeUndefined();
+      expect(getLiveForStepRun(db, "s2")).toBeUndefined();
+      // A run that can still act on its card keeps it: active, and paused (resumable, worker alive).
+      expect(getLiveForStepRun(db, "s3")?.status).toBe("paused_for_input");
+      expect(getLiveForStepRun(db, "s4")?.status).toBe("paused_for_input");
+    });
   });
 });

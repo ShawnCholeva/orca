@@ -6,6 +6,7 @@ import {
   EvidenceFacet,
   PendingQuestion,
   ProviderRecoveryCheckpoint,
+  RefuteFacet,
   StoredStepResultScoring,
   WorkflowStepOutputSchema,
   WorkflowStepResult,
@@ -146,13 +147,45 @@ function rebuildConfirmedFrame(
   try { block = JSON.parse(artifact.body); } catch { return undefined; }
 
   const leadText = confirmedLead ?? (stepResult.resultSummary ?? stepResult.outcome.reason);
+
+  // The live card showed an evidence bundle and an independent-check verdict read
+  // from the completion stash, which confirming clears. Both were also written to
+  // the step's `step_complete` transition — the append-only record — so read them
+  // back from there rather than dropping them: a confirmed card used to say
+  // "Scores" under a live card that had said "Evidence". A `NULL` evidence_json
+  // on a recorded transition is what a reasoning step writes (no sensors ran),
+  // so it maps to the structural bundle the live card showed; no transition at
+  // all (pre-transition runs) omits the bundle rather than inventing one.
+  const transition = db
+    .prepare(
+      `SELECT evidence_json, refute_json FROM harness_transitions
+       WHERE workflow_step_run_id = ? AND boundary = 'step_complete'
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(stepRunId) as { evidence_json: string | null; refute_json: string | null } | undefined;
+  const evidence = transition ? parseFacet(EvidenceFacet, transition.evidence_json) : undefined;
+  const refuteFacet = transition ? parseFacet(RefuteFacet, transition.refute_json) : null;
+  const refute = refuteFacet
+    ? { verdict: refuteFacet.verdict, reason: refuteFacet.reason, issueRefs: refuteFacet.issue_refs }
+    : null;
   return buildConfirmationSummary(
     schemaParse.data,
     block,
     null,
     leadText,
     routingForStep(graphJson, stepTemplateId),
+    refute,
+    evidence,
   );
+}
+
+/** A stored facet column: absent or malformed reads as null, never as a throw. */
+function parseFacet<T>(schema: { safeParse(v: unknown): { success: boolean; data?: T } }, json: string | null): T | null {
+  if (json === null) return null;
+  let raw: unknown;
+  try { raw = JSON.parse(json); } catch { return null; }
+  const parsed = schema.safeParse(raw);
+  return parsed.success ? (parsed.data as T) : null;
 }
 
 function enrichStepResult(db: Database.Database, activity: ActivityT): ActivityT {

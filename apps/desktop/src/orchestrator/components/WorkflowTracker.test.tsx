@@ -233,4 +233,43 @@ describe("WorkflowTracker", () => {
     screen.getByRole("button", { name: /view workflow/i }).click();
     expect(onViewWorkflows).toHaveBeenCalledTimes(1);
   });
+
+  it("numbers step nodes the way the header counts them — gates take no number", () => {
+    // Header said "Step 4 of 6" while the nodes read 1,2,3,4,[gate],6,[gate],8:
+    // the node numbering counted gates, the total did not. One counting rule.
+    render(
+      <WorkflowTracker
+        workflowName="Engineering"
+        steps={[
+          { name: "Plan" },
+          { name: "Build" },
+          { name: "Critique", kind: "gate" },
+          { name: "Ship" },
+          { name: "Review", kind: "gate" },
+          { name: "Done" },
+        ]}
+        activeIndex={0}
+      />,
+    );
+    expect(screen.getByText("Step 1 of 4")).toBeInTheDocument();
+    // Pending step nodes carry their step number; the one after a gate is 3, not 4.
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.queryByText("5")).toBeNull();
+    expect(screen.queryByText("6")).toBeNull();
+  });
+
+  it("marks the active step 'waiting on you' (not 'running') when the step awaits the user", () => {
+    // The step run's awaitingUser flag — the agent answered in chat and stopped,
+    // or parked on a question/permission — was never consumed by the stepper, so
+    // it pulsed "running" over a step whose next move is the reader's.
+    render(
+      <WorkflowTracker workflowName="Engineering" steps={steps} activeIndex={1} awaitingUser />,
+    );
+    expect(screen.getByText("waiting on you")).toBeInTheDocument();
+    expect(screen.queryByText("running")).toBeNull();
+    // Not done either: the active step shows no completion check.
+    expect(screen.queryAllByTestId("tracker-done-check")).toHaveLength(1);
+  });
 });

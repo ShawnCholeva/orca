@@ -45,6 +45,11 @@ type Props = {
   // instead of pulsing "running" (honest status — the work has stopped, it's the
   // human's turn). The Continue/Revise action lives in the chat thread.
   awaitingConfirm?: boolean;
+  // The step run's own "parked on the human" flag — the agent answered in chat
+  // and stopped, or is waiting on a question or permission. Any of the more
+  // specific states above wins the label; this is the floor, so a step whose
+  // next move is the reader's never pulses "running".
+  awaitingUser?: boolean;
   // Indices of steps the run routed PAST (e.g. an approach_only skip of Clarify/
   // Research). They render as "skipped" — muted, no completion check — so the user
   // can tell a bypassed step from one that actually ran.
@@ -118,6 +123,7 @@ export function WorkflowTracker({
   approving = false,
   awaitingGate = false,
   awaitingConfirm = false,
+  awaitingUser = false,
   skippedIndices = [],
   onViewWorkflows,
 }: Props) {
@@ -129,6 +135,9 @@ export function WorkflowTracker({
   // that follows step 2).
   const totalSteps = steps.filter((s) => s.kind !== "gate").length;
   const currentStepNumber = steps.slice(0, activeIndex + 1).filter((s) => s.kind !== "gate").length;
+  // Node numbers follow the same rule as the header, so the node after a gate
+  // is "3 of 4", never "4 of 4". Gates are unnumbered (they carry a glyph).
+  const stepNumberAt = (i: number) => steps.slice(0, i + 1).filter((s) => s.kind !== "gate").length;
 
   return (
     <div
@@ -216,11 +225,15 @@ export function WorkflowTracker({
           const isGate = step.kind === "gate";
           const isSkipped = skippedIndices.includes(i);
           const isAwaiting =
-            !completed && (awaitingApproval || awaitingGate || awaitingConfirm) && i === activeIndex;
+            !completed &&
+            (awaitingApproval || awaitingGate || awaitingConfirm || awaitingUser) &&
+            i === activeIndex;
           const done =
             !isSkipped &&
             (completed || i < activeIndex || (i === activeIndex && !activeRunning && !isAwaiting));
-          const isActive = !completed && !isSkipped && activeRunning && i === activeIndex;
+          // A node that is waiting on someone cannot also be running: the awaiting
+          // states win regardless of what the caller believes about execution.
+          const isActive = !completed && !isSkipped && activeRunning && !isAwaiting && i === activeIndex;
           const dotColor = done
             ? "var(--run)"
             : isActive || isAwaiting
@@ -280,7 +293,7 @@ export function WorkflowTracker({
                         color: isActive ? "#fff" : "var(--text-4)",
                       }}
                     >
-                      {i + 1}
+                      {stepNumberAt(i)}
                     </span>
                   )}
                 </div>
@@ -349,9 +362,11 @@ export function WorkflowTracker({
                     />
                     {awaitingGate
                       ? "awaiting gate"
-                      : awaitingConfirm && !awaitingApproval
-                        ? "awaiting confirmation"
-                        : "awaiting approval"}
+                      : awaitingApproval
+                        ? "awaiting approval"
+                        : awaitingConfirm
+                          ? "awaiting confirmation"
+                          : "waiting on you"}
                   </span>
                 )}
                 {isSkipped && (

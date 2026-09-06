@@ -11,6 +11,7 @@ import type { Config } from "./config.js";
 import { createDaemonContext } from "./daemon-context.js";
 import { closeDatabase, openDatabase } from "./db.js";
 import { eventBus } from "./events.js";
+import { getLiveForStepRun, pauseForConfirmation } from "./activities/store.js";
 import { defaultMigrationsDir, runMigrations } from "./migrations.js";
 import { bootstrapRegistries } from "./registry/bootstrap.js";
 import { createServer } from "./server.js";
@@ -1079,5 +1080,38 @@ describe("daemon activity integration", () => {
       headers: { "content-type": "application/json", ...AUTH_HEADERS },
     });
     expect(bad.statusCode).toBe(400);
+  });
+
+  it("expires a step's open card when its run reaches a terminal state", async () => {
+    // A run that blocks (crash cap, unroutable gate, …) tears down its workers on
+    // the same event; the cards those workers raised must go with them, or the
+    // chat keeps rendering Continue / Revise on a run that can never act on it.
+    const ids = {
+      goalId: "goal-run-blocked",
+      runId: "run-run-blocked",
+      stepRunId: "step-run-blocked",
+      sessionId: "session-run-blocked",
+    };
+    seedLiveWorkflowSession(db, ids);
+    pauseForConfirmation(
+      { db, bus: eventBus },
+      { goalId: ids.goalId, workflowRunId: ids.runId, stepRunId: ids.stepRunId, summary: "Done?" }
+    );
+    expect(getLiveForStepRun(db, ids.stepRunId)?.status).toBe("paused_for_input");
+
+    eventBus.publish({
+      seq: 1,
+      id: "event-run-blocked",
+      type: "workflow.run.blocked",
+      goalId: ids.goalId,
+      payload: { goalId: ids.goalId, workflowRunId: ids.runId, status: "blocked" },
+      createdAt: NOW,
+    });
+
+    expect(getLiveForStepRun(db, ids.stepRunId)).toBeUndefined();
+    const activities = ListActivitiesResponse.parse(
+      (await server.inject({ method: "GET", url: `/v1/goals/${ids.goalId}/activities`, headers: AUTH_HEADERS })).json()
+    );
+    expect(activities.items.find((a) => a.stepRunId === ids.stepRunId)?.status).toBe("expired");
   });
 });

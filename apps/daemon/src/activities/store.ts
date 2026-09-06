@@ -885,6 +885,81 @@ export function expireConfirmation(
   return activity;
 }
 
+/**
+ * Expire every live row of a run that has stopped.
+ *
+ * A run reaches `completed`, `failed`, `cancelled` or `blocked` and its workers
+ * are torn down on the same event — but the cards those workers raised (a
+ * Continue / Revise confirmation, a permission request, a question) stayed
+ * `paused_for_input`. The chat kept rendering their controls, the reader could
+ * click into a dead end, and "waiting on you" counted a run nothing was waiting
+ * on. Three confirmation cards sat open for two days on runs blocked at the
+ * crash cap.
+ *
+ * Resuming a blocked run opens a fresh attempt of the step (resumeWorkflowRun),
+ * so nothing ever reads the old row again; expiring it loses nothing. One
+ * activity.changed per row, so the chat drops the controls the moment the run
+ * stops rather than on its next full reload.
+ */
+export function expireLiveForRun(
+  ctx: ActivityStoreCtx,
+  input: { workflowRunId: string }
+): ActivityT[] {
+  const events: DomainEvent[] = [];
+  const expired = ctx.db.transaction(() => {
+    const rows = ctx.db
+      .prepare(
+        `SELECT * FROM activities
+         WHERE workflow_run_id = ? AND status IN ('active', 'paused_for_input')
+         ORDER BY created_at ASC`
+      )
+      .all(input.workflowRunId) as ActivityRow[];
+    const now = currentTime(ctx);
+    const out: ActivityT[] = [];
+    for (const row of rows) {
+      ctx.db
+        .prepare(
+          `UPDATE activities
+           SET status = 'expired', pending_question = NULL, updated_at = ?, completed_at = ?
+           WHERE id = ?`
+        )
+        .run(now, now, row.id);
+      ctx.db
+        .prepare("UPDATE activity_steps SET status = 'done' WHERE activity_id = ? AND status = 'active'")
+        .run(row.id);
+      const activity = getActivityById(ctx.db, row.id);
+      if (activity === undefined) throw new Error(`Activity disappeared: ${row.id}`);
+      events.push(insertActivityChangedEvent(ctx.db, activity, now));
+      out.push(activity);
+    }
+    return out;
+  })();
+  for (const event of events) publishActivityChanged(ctx, event);
+  return expired;
+}
+
+/**
+ * The same rule applied at boot to every run that stopped while nobody was
+ * listening — a block written by boot reconciliation, or a terminal event the
+ * previous daemon generation died before handling. `paused` is deliberately
+ * not in the set: a paused run resumes with its worker and its card intact.
+ * Returns the number of rows expired.
+ */
+export function expireLiveOnStoppedRuns(ctx: ActivityStoreCtx): number {
+  const runs = ctx.db
+    .prepare(
+      `SELECT DISTINCT a.workflow_run_id AS id
+       FROM activities a
+       JOIN workflow_runs wr ON wr.id = a.workflow_run_id
+       WHERE a.status IN ('active', 'paused_for_input')
+         AND wr.status IN ('completed', 'failed', 'cancelled', 'blocked')`
+    )
+    .all() as Array<{ id: string }>;
+  let expired = 0;
+  for (const run of runs) expired += expireLiveForRun(ctx, { workflowRunId: run.id }).length;
+  return expired;
+}
+
 // Point-in-time record of one orchestrator LLM turn (auditable trajectory).
 // A completed row (not the one-live-per-step bubble) so it never conflicts with
 // the live worker activity for the same step.

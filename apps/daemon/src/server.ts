@@ -99,6 +99,7 @@ import {
   listWorkspacesByGoal,
   listWorkspaceSummaries,
   findWorkspaceById,
+  findWorkspaceByPath,
   listGoalViewsForWorkspace,
 } from './workspaces/projection.js';
 import {
@@ -250,7 +251,7 @@ import { categorizeClaudeTool, isLowSignalTool, narratePendingToolDetail, narrat
 import { reconstructEditDiff } from './activities/diff.js';
 import type { ActivitySignal } from './activities/signals.js';
 import type { ActivityStoreCtx } from './activities/store.js';
-import { recordOrchestratorReasoning } from './activities/store.js';
+import { expireLiveForRun, expireLiveOnStoppedRuns, recordOrchestratorReasoning } from './activities/store.js';
 import { extractOrchestratorReasoning } from './orchestrator-llm/reasoning-extract.js';
 import { ActivityUpdater } from './activities/updater.js';
 import { reconcileStepResultActivities } from './activities/step-result-activity.js';
@@ -1001,6 +1002,14 @@ export function createServer(
         if (reaped.length > 0) {
           console.log(`[reap] killed ${reaped.length} orphaned tmux session(s): ${reaped.join(", ")}`);
         }
+        // Runs that stopped while no daemon was listening (a block written by
+        // boot reconciliation just above, or a terminal event the previous
+        // generation died before handling) still hold live cards. Same rule as
+        // the terminal-event subscriber, applied to what it could not see.
+        const expired = expireLiveOnStoppedRuns({ db, bus: eventBus });
+        if (expired > 0) {
+          console.log(`[reap] expired ${expired} live activit${expired === 1 ? "y" : "ies"} on stopped runs`);
+        }
       })
       .catch((err) => console.error("[resume] boot resume failed", err));
   }
@@ -1025,6 +1034,11 @@ export function createServer(
         for (const sessionId of workerSessionIdsForRun(db, runId)) {
           void workerSessions.terminate(sessionId).catch(() => {});
         }
+        // The cards those workers raised die with the run. A Continue/Revise
+        // card left `paused_for_input` on a blocked run renders controls that
+        // lead nowhere and counts as "waiting on you" for a run nothing is
+        // waiting on — three of them sat open for two days.
+        expireLiveForRun({ db, bus: eventBus }, { workflowRunId: runId });
       }
     }
   });
@@ -1363,7 +1377,13 @@ export function createServer(
 
     try {
       const preview = await inspectWorkspace(parsed.data.inputPath);
-      return { preview };
+      // The inspector names a folder by its basename. A registered folder has a
+      // name the user chose, and every surface that renders this preview (the
+      // create-goal flow's attached-workspace row) must show that one —
+      // "Orca Scratch", not "orca-scratch". Goal creation already attaches the
+      // registered entity; this makes the preview agree with it.
+      const registered = findWorkspaceByPath(getDatabase(), preview.path);
+      return { preview: registered ? { ...preview, name: registered.name } : preview };
     } catch (error) {
       if (error instanceof WorkspaceInspectionError) {
         reply.status(inspectionStatus(error));
