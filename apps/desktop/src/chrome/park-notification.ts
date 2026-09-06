@@ -9,9 +9,19 @@ import type { RunSummary } from "@orca/contracts";
 
 type Waiting = Map<string, RunSummary["awaitingYou"]>;
 
-/** Goals that are waiting now and were not waiting before. */
+/**
+ * Goals with something new to say: waiting now and not before, or waiting for a
+ * DIFFERENT thing than before. A reader who answered the confirmation card and
+ * walked away would otherwise never hear about the mark-done card that followed
+ * it thirty seconds later, because the goal never stopped "waiting".
+ */
 export function newlyWaiting(prev: Waiting, next: Waiting): string[] {
-  return [...next.keys()].filter((goalId) => !prev.has(goalId));
+  return [...next.entries()]
+    .filter(([goalId, w]) => {
+      const before = prev.get(goalId);
+      return before === undefined || before.sourceKind !== w.sourceKind;
+    })
+    .map(([goalId]) => goalId);
 }
 
 /** True when the reader cannot see the app: hidden, or open behind another window. */

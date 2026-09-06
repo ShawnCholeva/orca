@@ -11,8 +11,16 @@ describe("newlyWaiting", () => {
     const prev = new Map([["g-old", w(1000)]]);
     const next = new Map([["g-old", w(2000)], ["g-new", w(10)]]);
     expect(newlyWaiting(prev, next)).toEqual(["g-new"]);
-    // A goal that keeps waiting is not news, and one that stopped is not either.
+    // A goal that keeps waiting for the same thing is not news, and one that stopped is not either.
     expect(newlyWaiting(next, prev)).toEqual([]);
+  });
+
+  it("names a goal that is now waiting for something different", () => {
+    // The Done confirmation was answered; the mark-done card that followed it
+    // thirty seconds later kept the goal "waiting" and so went unannounced.
+    const prev = new Map([["g", { count: 1, sinceMs: 30_000, sourceKind: "step_confirmation_pending" as const }]]);
+    const next = new Map([["g", { count: 1, sinceMs: 1_000, sourceKind: "mark_done_pending" as const }]]);
+    expect(newlyWaiting(prev, next)).toEqual(["g"]);
   });
 });
 
