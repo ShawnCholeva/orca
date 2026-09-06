@@ -849,7 +849,8 @@ describe("occurrences per interval", () => {
     const b = bucketize([start + H], start, start + 7 * 24 * H, 8 * H);
     const { container } = render(<TimeBars buckets={b} fromMs={start} toMs={start + 7 * 24 * H} unit={{ one: "x", many: "x" }} />);
     const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent).filter((t) => /[A-Z]/.test(t ?? ""));
-    expect(labels.length).toBeLessThanOrEqual(7);
+    // A third-width panel: four labels at most, so none collide.
+    expect(labels.length).toBeLessThanOrEqual(4);
     expect(labels[0]).toBe("Aug 30 00:00");
     expect(new Set(labels).size).toBe(labels.length);
   });

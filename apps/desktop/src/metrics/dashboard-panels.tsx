@@ -408,7 +408,8 @@ export function TimeBars({
   const gridlines: number[] = [];
   for (let n = stepY; n <= max; n += stepY) gridlines.push(n);
 
-  const axis = timeAxis(buckets, fromMs);
+  // A third-width panel fits four dated labels; six collided at the left edge.
+  const axis = timeAxis(buckets, fromMs, 4);
   const stamp = timeFormat("%b %d %H:%M");
 
   return (
@@ -447,10 +448,10 @@ export function TimeBars({
  * boundary inside the window, labels thinned to at most six, and a format that
  * names the day once labelled ticks are a day or more apart.
  */
-function timeAxis(buckets: TimeBucket[], fromMs: number) {
+function timeAxis(buckets: TimeBucket[], fromMs: number, maxLabels = 6) {
   const intervalMs = buckets.length > 0 ? buckets[0]!.endMs - buckets[0]!.startMs : HOUR_MS;
   const boundaries = buckets.map((b) => b.startMs).filter((t) => t >= fromMs);
-  const every = Math.max(1, Math.ceil(boundaries.length / 6));
+  const every = Math.max(1, Math.ceil(boundaries.length / maxLabels));
   const labelledStep = every * intervalMs;
   const fmt = labelledStep >= DAY_MS
     ? (intervalMs >= DAY_MS ? timeFormat("%b %d") : timeFormat("%b %d %H:%M"))
