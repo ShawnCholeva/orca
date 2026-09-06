@@ -450,7 +450,10 @@ export function TimeBars({
               <line x1={tx} x2={tx} y1={y(0)} y2={y(0) + (labelled ? 5 : 3)}
                     stroke={labelled ? "var(--hairline-strong)" : "var(--hairline)"} />
               {labelled && (
-                <text x={tx} y={height - 8} textAnchor="middle" className="mono"
+                // A label near either edge anchors inward, so the last one is never
+                // clipped by the panel and the first never runs under the axis.
+                <text x={tx} y={height - 8} className="mono"
+                      textAnchor={tx > width - 40 ? "end" : tx < left + 24 ? "start" : "middle"}
                       style={{ fontSize: 9, fill: "var(--text-3)" }}>{fmt(new Date(t))}</text>
               )}
             </g>
