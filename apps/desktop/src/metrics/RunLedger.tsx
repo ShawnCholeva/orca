@@ -65,6 +65,7 @@ export const PROMPT_KIND: Record<NonNullable<RunSummary["awaitingYou"]["sourceKi
   mark_done_pending: "marking it done",
   permission_pending: "a permission",
   provider_recovery_pending: "provider recovery",
+  chat_reply_pending: "a reply to the agent",
   unknown: "a prompt whose reason wasn't kept",
 };
 

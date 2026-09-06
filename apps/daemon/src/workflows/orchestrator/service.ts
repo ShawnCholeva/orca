@@ -1493,7 +1493,16 @@ export class OrchestratorService {
             }
           );
 
-          if (evidence && evidence.verdict !== "passed") {
+          // Only a sensor that RAN and failed, or an enforced grounding check that
+          // failed, sends the step back: those name a defect in the work. A
+          // "partial" verdict means a required check could not run — no script, or
+          // a no-op stub — which is a fact about the repository, not the step. It
+          // used to revise here with "required checks did not run", and the only
+          // way an agent could satisfy that was to install the missing tooling:
+          // TypeScript, ESLint, a tsconfig and a lockfile arrived in a four-line
+          // module's repo, unasked. The gap still counts: oracleAdequacy stays
+          // insufficient, the refute lane runs, and the card says "Can't verify".
+          if (evidence && evidence.verdict === "failed") {
             evStaged.push(
               appendWorkflowEvent(
                 db,
@@ -1533,7 +1542,13 @@ export class OrchestratorService {
               appendWorkflowEvent(
                 db,
                 "workflow.validation.passed",
-                { goalId: ctx.run.goalId, workflowRunId: ctx.run.id, stepRunId: ctx.stepRun.id },
+                {
+                  goalId: ctx.run.goalId,
+                  workflowRunId: ctx.run.id,
+                  stepRunId: ctx.stepRun.id,
+                  // Named so the record cannot read as "every required check ran".
+                  ...(evidence && evidence.verdict === "partial" ? { gaps: evidence.oracleAdequacy.gaps } : {}),
+                },
                 now(),
                 options.idFactory
               )

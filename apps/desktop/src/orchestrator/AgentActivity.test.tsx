@@ -151,4 +151,24 @@ describe("CodeChangeCard", () => {
     expect(screen.getByText("old()")).toBeTruthy();
     expect(screen.getByText("new()")).toBeTruthy();
   });
+
+  it("renders a finished generic step in the past tense, never as work in progress", () => {
+    // "✓ Working on the step..." on an ended turn described something not happening.
+    render(
+      <AgentActivity
+        tail="settled"
+        activity={baseActivity({
+          status: "expired",
+          steps: [
+            { id: "1", text: "Working on the step...", category: "other", status: "done", createdAt: "t" },
+            { id: "2", text: "Ran npm test", category: "testing", status: "done", createdAt: "t" },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText("Worked on the step")).toBeInTheDocument();
+    expect(screen.queryByText("Working on the step...")).toBeNull();
+    // A tool's own past-tense narration is left alone.
+    expect(screen.getByText("Ran npm test")).toBeInTheDocument();
+  });
 });

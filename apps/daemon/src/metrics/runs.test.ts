@@ -721,6 +721,16 @@ describe("park episodes", () => {
 });
 
 describe("computeAwaitingYou", () => {
+  it("counts the parks no activity row holds — an open question, a chat reply — beside the card parks", () => {
+    // The goals rail read only the activity half and showed no WAITING under an
+    // open question. Only the union is complete; the longest wait names the kind.
+    const out = computeAwaitingYou([], [
+      { sourceKind: "question_pending", sinceMs: 5 * 60_000 },
+      { sourceKind: "chat_reply_pending", sinceMs: 60_000 },
+    ]);
+    expect(out).toEqual({ count: 2, sinceMs: 5 * 60_000, sourceKind: "question_pending" });
+  });
+
   const park = (over: Partial<Intervention>): Intervention => ({
     activityId: "a1", goalId: GOAL_ID, workflowRunId: RUN_ID, workflowStepRunId: "sr-1",
     sourceKind: "step_confirmation_pending", enteredAt: "2026-09-01T00:00:00.000Z",

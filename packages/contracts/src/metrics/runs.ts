@@ -64,6 +64,10 @@ export const InterventionSourceKind = z.enum([
   "mark_done_pending",
   "permission_pending",
   "provider_recovery_pending",
+  // The orchestrator answered, paraphrased or escalated in chat and stopped:
+  // the next move is the reader's, but no activity row represents it (see
+  // activities/awaiting-user.ts). Carried here so "waiting on you" can count it.
+  "chat_reply_pending",
   "unknown",
 ]);
 export type InterventionSourceKind = z.infer<typeof InterventionSourceKind>;

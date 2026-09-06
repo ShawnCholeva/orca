@@ -4,7 +4,46 @@ import {
   activitySourceKinds, getRun, listActivityEventsByGoal, listRunEventsByGoal, listRuns,
   listStepRunsByRun, listTransitionsByRun,
 } from "./runs-fetch.js";
-import { buildInterventions, buildRunDetail, buildRunSummary, buildSpans } from "./runs.js";
+import { buildInterventions, buildRunDetail, buildRunSummary, buildSpans, type HumanPark } from "./runs.js";
+import type { Intervention } from "@orca/contracts";
+
+/**
+ * The parks on the human that `activities` does not hold — see HumanPark.
+ * Only a live run can be waiting; a run that ended has its ending. A worker's
+ * question normally also parks its activity (question_pending), so message
+ * questions count only when no such park is open, and the chat-reply flag only
+ * when nothing else already says the reader's move is next.
+ */
+function openHumanParks(db: Database.Database, run: { runId: string; goalId: string; status: string }, interventions: Intervention[], nowMs: number): HumanPark[] {
+  if (run.status !== "active") return [];
+  const open = interventions.filter((iv) => iv.open && iv.parkState === "awaiting_you");
+  const parks: HumanPark[] = [];
+  const questionParked = open.some((iv) => iv.sourceKind === "question_pending");
+  if (!questionParked) {
+    const questions = db
+      .prepare(
+        `SELECT created_at FROM orchestrator_messages
+         WHERE goal_id = ? AND pending_question IS NOT NULL
+           AND json_extract(pending_question, '$.answer') IS NULL
+           AND json_extract(pending_question, '$.withdrawn') IS NULL`
+      )
+      .all(run.goalId) as Array<{ created_at: string }>;
+    for (const q of questions) parks.push({ sourceKind: "question_pending", sinceMs: Math.max(0, nowMs - Date.parse(q.created_at)) });
+  }
+  if (open.length === 0 && parks.length === 0) {
+    const step = db
+      .prepare("SELECT w.awaiting_user FROM workflow_runs wr JOIN workflow_step_runs w ON w.id = wr.current_step_run_id WHERE wr.id = ?")
+      .get(run.runId) as { awaiting_user: number } | undefined;
+    if (step?.awaiting_user === 1) {
+      // The flag carries no timestamp; the reply that raised it does.
+      const last = db
+        .prepare("SELECT created_at FROM orchestrator_messages WHERE goal_id = ? AND role = 'orchestrator' ORDER BY created_at DESC LIMIT 1")
+        .get(run.goalId) as { created_at: string } | undefined;
+      parks.push({ sourceKind: "chat_reply_pending", sinceMs: last ? Math.max(0, nowMs - Date.parse(last.created_at)) : 0 });
+    }
+  }
+  return parks;
+}
 
 /**
  * Step display names for a run. Prefers the run's own `template_snapshot_json` so a
@@ -76,6 +115,7 @@ export function getRunSummaries(
     });
     return buildRunSummary({
       run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs,
+      humanParks: openHumanParks(db, run, interventions, nowMs),
     });
   });
 }

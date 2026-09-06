@@ -29,6 +29,7 @@ const WANTS: Partial<Record<string, string>> = {
   mark_done_pending: "the final sign-off",
   permission_pending: "a permission request",
   provider_recovery_pending: "a provider limit it needs you to resolve",
+  chat_reply_pending: "a reply to what the agent said",
 };
 
 /** Runs with something the reader can act on right now, longest wait first. */

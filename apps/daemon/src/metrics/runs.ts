@@ -583,8 +583,10 @@ export function buildRunSummary(input: {
   activityEvents: ActivityEvent[];
   runEvents: RunEvent[];
   nowMs: number;
+  humanParks?: HumanPark[];
 }): RunSummary {
   const { run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs } = input;
+  const humanParks = input.humanParks ?? [];
   const termination = deriveTermination(run, stepRuns, transitions);
   return {
     runId: run.runId,
@@ -607,7 +609,7 @@ export function buildRunSummary(input: {
     spanRelaunches: spans.reduce((acc, s) => acc + s.restarts, 0),
     retriedAttempts: spans.filter((s) => s.attempt > 1).length,
     openInterventions: interventions.filter((iv) => iv.open).length,
-    awaitingYou: computeAwaitingYou(interventions),
+    awaitingYou: computeAwaitingYou(interventions, humanParks),
   };
 }
 
@@ -617,11 +619,27 @@ export function buildRunSummary(input: {
  * status check and no clipping — the longest-open-park age cannot run past a
  * terminated run because such a park is never in this set.
  */
-export function computeAwaitingYou(interventions: Intervention[]): RunSummary["awaitingYou"] {
-  const waiting = interventions.filter((iv) => iv.open && iv.parkState === "awaiting_you");
+/**
+ * A park on the human that no activity row represents. Two channels: an
+ * unanswered question in the chat (a worker's AskUserQuestion, or the
+ * orchestrator's own), and the step run's awaiting-user flag (the orchestrator
+ * replied in chat and stopped). `activities` covers the card parks; only the
+ * union is complete — the goals rail read one half and showed no WAITING under
+ * an open question.
+ */
+export interface HumanPark {
+  sourceKind: InterventionSourceKind;
+  sinceMs: number;
+}
+
+export function computeAwaitingYou(interventions: Intervention[], humanParks: HumanPark[] = []): RunSummary["awaitingYou"] {
+  const waiting: HumanPark[] = [
+    ...interventions.filter((iv) => iv.open && iv.parkState === "awaiting_you").map((iv) => ({ sourceKind: iv.sourceKind, sinceMs: iv.durationMs })),
+    ...humanParks,
+  ];
   if (waiting.length === 0) return { count: 0, sinceMs: null, sourceKind: null };
-  const longest = waiting.reduce((a, b) => (b.durationMs > a.durationMs ? b : a));
-  return { count: waiting.length, sinceMs: longest.durationMs, sourceKind: longest.sourceKind };
+  const longest = waiting.reduce((a, b) => (b.sinceMs > a.sinceMs ? b : a));
+  return { count: waiting.length, sinceMs: longest.sinceMs, sourceKind: longest.sourceKind };
 }
 
 export function buildRunDetail(input: {

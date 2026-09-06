@@ -68,6 +68,21 @@ export function AgentActivity({
 
 type StepRowState = "done" | "running" | "interrupted";
 
+// A step's text is chosen when its tool STARTS, so it reads as work in progress.
+// Once the step is done — and above all once the whole turn has ended — a
+// present-progressive line under a check ("✓ Working on the step...") describes
+// something that is not happening. Only the daemon's generic narrations need
+// this; a tool's own narration ("Ran npm test", "Read package.json") is past
+// tense already.
+const DONE_TEXT: Record<string, string> = {
+  "Reading through the codebase...": "Read through the codebase",
+  "Searching the codebase...": "Searched the codebase",
+  "Making changes...": "Made changes",
+  "Running a command...": "Ran a command",
+  "Running the test suite...": "Ran the test suite",
+  "Working on the step...": "Worked on the step",
+};
+
 function StepRow({ step, state }: { step: ActivityStep; state: StepRowState }) {
   const testid =
     state === "done"
@@ -78,7 +93,9 @@ function StepRow({ step, state }: { step: ActivityStep; state: StepRowState }) {
   return (
     <div className="agent-activity-step" data-testid={testid}>
       {state === "done" ? <Check /> : state === "interrupted" ? <PauseGlyph /> : <Pulse />}
-      <span className={`agent-activity-step-text${state === "done" ? " is-done" : ""}`}>{step.text}</span>
+      <span className={`agent-activity-step-text${state === "done" ? " is-done" : ""}`}>
+        {state === "done" ? DONE_TEXT[step.text] ?? step.text : step.text}
+      </span>
     </div>
   );
 }

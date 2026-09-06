@@ -32,7 +32,7 @@ const getTemplateMetricsDetailMock = vi.fn();
 // Nothing waiting unless a test says otherwise; App calls this on mount.
 const getRunSummariesMock = vi.fn().mockResolvedValue([]);
 
-const notifyParkedMock = vi.fn(async () => undefined);
+const notifyParkedMock = vi.fn(async (..._args: unknown[]) => undefined);
 let appOutOfSightMock = true;
 vi.mock("./chrome/park-notification", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./chrome/park-notification")>();

@@ -501,11 +501,15 @@ const tempDirs: string[] = [];
 /** Like seedWorkspace but points 'ws-1' at a real temp dir with a package.json
  *  whose `typecheck` script exits with `exitCode`, so runSensors executes it. */
 function seedWorkspaceWithTypecheck(db: Database.Database, exitCode: 0 | 1): string {
+  return seedWorkspaceWithTypecheckScript(db, `node -e "process.exit(${exitCode})"`);
+}
+
+function seedWorkspaceWithTypecheckScript(db: Database.Database, script: string): string {
   const dir = join(tmpdir(), `orca-evidence-veto-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "package.json"),
-    JSON.stringify({ name: "evidence-veto-fixture", scripts: { typecheck: `node -e "process.exit(${exitCode})"` } })
+    JSON.stringify({ name: "evidence-veto-fixture", scripts: { typecheck: script } })
   );
   tempDirs.push(dir);
   db.prepare(
@@ -4003,6 +4007,35 @@ describe("OrchestratorService evidence veto (deterministic)", () => {
     reason: "ok",
     handoffReady: true,
   };
+
+  it("lets a completion through when a required sensor is a no-op stub — gaps recorded, no revise", async () => {
+    // A repo's stub `typecheck` is a fact about the repo, not the step. Revising
+    // on it could only be satisfied by installing tooling — which is exactly what
+    // the agent did, unasked, on a four-line module. The gap stays on the record
+    // and the refute lane sees an insufficient oracle; the step is not sent back.
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson });
+    seedWorkspaceWithTypecheckScript(db, "echo no types");
+    seedAgentSession(db);
+    setSupervisionMode(db, "unsupervised", NOW);
+    db.prepare("UPDATE goals SET operating_mode = 'automated' WHERE id = 'goal-1'").run();
+    const deliver = vi.fn(async () => "delivered" as const);
+    const service = makeJudgeService(fakeMediator({ kind: "approve_step_complete", scoring: approveScoring }), deliver);
+    const responseText = "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```";
+
+    await service.onAgentResponseDone(db, () => NOW, { sessionId: "sess-judge", adapterId: "claude-code", responseText }, { bus, idFactory });
+    await flushDeferred();
+
+    expect(stepOutputCount(db)).toBe(1);
+    expect(deliver).not.toHaveBeenCalled();
+    const validation = db
+      .prepare("SELECT type, payload FROM events WHERE type LIKE 'workflow.validation.%' ORDER BY created_at")
+      .all() as { type: string; payload: string }[];
+    expect(validation.map((e) => e.type)).not.toContain("workflow.validation.failed");
+    const passed = validation.find((e) => e.type === "workflow.validation.passed");
+    expect(passed).toBeDefined();
+    expect(JSON.parse(passed!.payload).gaps.join(" ")).toContain("no-op stub");
+  });
 
   it("vetoes completion when a required sensor fails", async () => {
     const { db, bus, idFactory } = setupHarness();
