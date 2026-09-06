@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Agent, GoalListItem } from "@orca/contracts";
+import type { Agent, GoalListItem, RunSummary } from "@orca/contracts";
 import type { ConnectionStatus } from "./api";
 import App from "./App";
 import { ThemeProvider } from "./theme/ThemeProvider";
@@ -490,5 +490,25 @@ describe("Goals rail waiting badge", () => {
     const rail = await screen.findByRole("complementary", { name: "Goals" });
     await within(rail).findByText("waiting");
     expect(notifyParkedMock).not.toHaveBeenCalled();
+  });
+
+  it("flips a goal's chip to BLOCKED when its run stopped and needs a Resume", async () => {
+    // A run at the crash cap goes nowhere until someone clicks Resume; the rail
+    // read "active" for it, which is the goal's status and the opposite of the truth.
+    const waitingRun = (await getRunSummariesMock.getMockImplementation()!()) as unknown as RunSummary[];
+    getRunSummariesMock.mockReset();
+    getRunSummariesMock.mockResolvedValue([{
+      ...waitingRun[0], runId: "r-blocked", goalId: "g-quiet", status: "blocked",
+      blockedReason: "crashed 3 times (worker_exited_no_signal)", terminationCause: "infrastructure_killed",
+      awaitingYou: { count: 0, sinceMs: null, sourceKind: null },
+    }]);
+    render(
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>,
+    );
+    const rail = await screen.findByRole("complementary", { name: "Goals" });
+    const chip = await within(rail).findByText("blocked");
+    expect(chip).toHaveAttribute("title", "Run blocked — needs your attention: crashed 3 times (worker_exited_no_signal)");
   });
 });

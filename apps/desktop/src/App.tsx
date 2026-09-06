@@ -18,7 +18,7 @@ import { OnboardingView } from "./onboarding/OnboardingView";
 import { Titlebar } from "./chrome/Titlebar";
 import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
-import { waitingByGoal, waitingLabel } from "./chrome/waiting-on-you";
+import { blockedByGoal, waitingByGoal, waitingLabel } from "./chrome/waiting-on-you";
 import { appOutOfSight, newlyWaiting, notifyParked } from "./chrome/park-notification";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
@@ -231,6 +231,7 @@ export default function App() {
   }, [refreshRuns]);
 
   const waiting = waitingByGoal(runs);
+  const blocked = blockedByGoal(runs);
 
   // A2 part 2: one OS notification the moment a run first parks while the app is
   // out of sight. The first poll is a baseline, not news — a goal that was already
@@ -376,6 +377,7 @@ export default function App() {
                     key={goal.id}
                     goal={goal}
                     waiting={waiting.get(goal.id) ?? null}
+                    blocked={blocked.has(goal.id) ? { reason: blocked.get(goal.id) ?? null } : null}
                     selected={goal.id === selectedOrchestratorGoalId}
                     onSelect={() => setSelectedOrchestratorGoalId(goal.id)}
                     onView={() => openGoalDetail(goal.id)}
@@ -559,6 +561,7 @@ export default function App() {
 function GoalCard({
   goal,
   waiting = null,
+  blocked = null,
   selected = false,
   onSelect,
   onView,
@@ -566,6 +569,8 @@ function GoalCard({
   goal: Goal;
   /** What this goal's run is waiting on the reader for, if anything. */
   waiting?: RunSummary["awaitingYou"] | null;
+  /** The goal's run stopped and needs a Resume; the reason as the engine recorded it. */
+  blocked?: { reason: string | null } | null;
   selected?: boolean;
   onSelect?: () => void;
   onView: () => void;
@@ -673,6 +678,10 @@ function GoalCard({
             {waiting ? (
               <span className="goal-card-status goal-card-status--waiting" title={waitingLabel(waiting)}>
                 waiting
+              </span>
+            ) : blocked ? (
+              <span className="goal-card-status goal-card-status--blocked" title={`Run blocked — needs your attention${blocked.reason ? `: ${blocked.reason}` : ""}`}>
+                blocked
               </span>
             ) : (
               <span className={`goal-card-status goal-card-status--${goal.status}`}>

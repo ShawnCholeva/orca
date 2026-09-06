@@ -197,6 +197,11 @@
   background: var(--warn-soft);
 }
 
+.goal-card-status--blocked {
+  color: var(--err);
+  background: var(--err-soft);
+}
+
 .goal-card-status--completed {
   color: #3fb950;
   background: rgba(63, 185, 80, 0.12);

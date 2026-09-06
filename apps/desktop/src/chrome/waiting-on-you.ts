@@ -50,6 +50,19 @@ export function waitingByGoal(runs: RunSummary[]): Map<string, RunSummary["await
   return byGoal;
 }
 
+/**
+ * Goals whose run stopped and needs the reader to restart it. Not a park — no
+ * card is waiting — but a run at the crash cap goes nowhere until someone
+ * clicks Resume, and its goal reading "active" on the rail said the opposite.
+ */
+export function blockedByGoal(runs: RunSummary[]): Map<string, string | null> {
+  const byGoal = new Map<string, string | null>();
+  for (const r of runs) {
+    if (r.status === "blocked" && !byGoal.has(r.goalId)) byGoal.set(r.goalId, r.blockedReason);
+  }
+  return byGoal;
+}
+
 /** "Waiting on you for 39h 0m · a step waiting for your OK" — the wait, then what for. */
 export function waitingLabel(w: RunSummary["awaitingYou"]): string {
   const since = formatDuration(w.sinceMs);

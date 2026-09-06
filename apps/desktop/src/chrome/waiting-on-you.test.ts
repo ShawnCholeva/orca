@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RunSummary } from "@orca/contracts";
-import { waitingByGoal, waitingLabel, waitingRuns } from "./waiting-on-you";
+import { blockedByGoal, waitingByGoal, waitingLabel, waitingRuns } from "./waiting-on-you";
 
 const HOUR = 3_600_000;
 
@@ -70,5 +70,11 @@ describe("waitingByGoal", () => {
     const byGoal = waitingByGoal([quiet, recent, old]);
     expect(byGoal.get("g1")).toEqual(old.awaitingYou);
     expect(byGoal.has("g-quiet")).toBe(false);
+  });
+
+  it("blockedByGoal names goals whose run stopped at the cap, with the engine's reason", () => {
+    const stuck = run({ runId: "b", goalId: "g-stuck", status: "blocked", blockedReason: "crashed 3 times (worker_exited_no_signal)" });
+    const fine = run({ runId: "a", goalId: "g-fine" });
+    expect(blockedByGoal([stuck, fine])).toEqual(new Map([["g-stuck", "crashed 3 times (worker_exited_no_signal)"]]));
   });
 });
