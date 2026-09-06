@@ -1,14 +1,27 @@
 import { execFile } from "node:child_process";
+import { join } from "node:path";
 
 export interface TmuxRunner {
   run(args: string[], input?: string): Promise<{ stdout: string; stderr: string; code: number }>;
 }
 
-export function defaultTmuxRunner(): TmuxRunner {
+/**
+ * Each daemon runs its sessions on its own tmux server, at a socket beside its
+ * database. The owner tag below stops the reaper from killing another daemon's
+ * workers; the socket stops any daemon from seeing them. A test that boots
+ * `startDaemon()` against a temp dir gets an empty server of its own, and the
+ * developer's live workers are not reachable from it by any code path, tagged
+ * or not. Inspect a daemon's sessions with `tmux -S <dataDir>/tmux.sock ls`.
+ */
+export function tmuxSocketPath(dataDir: string): string {
+  return join(dataDir, "tmux.sock");
+}
+
+export function defaultTmuxRunner(socketPath: string): TmuxRunner {
   return {
     run: (args, input) =>
       new Promise((resolve) => {
-        const cp = execFile("tmux", args, { maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+        const cp = execFile("tmux", ["-S", socketPath, ...args], { maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
           const code = err && typeof (err as { code?: unknown }).code === "number"
             ? (err as { code: number }).code : (err ? 1 : 0);
           resolve({ stdout: stdout?.toString() ?? "", stderr: stderr?.toString() ?? "", code });
@@ -20,11 +33,13 @@ export function defaultTmuxRunner(): TmuxRunner {
 
 /**
  * Every session a daemon creates carries the data dir that owns it, in the
- * tmux session environment. tmux is shared by every daemon on the machine —
- * the real one, a second data dir, a test that boots `startDaemon()` against a
- * temp dir — and the boot reaper kills what it does not recognise. Without an
- * owner it recognised nothing that was not in its own database, so a test run
- * killed every live worker on the developer's tmux server, twice per suite.
+ * tmux session environment. Before each daemon had its own socket, tmux was
+ * shared by every daemon on the machine — the real one, a second data dir, a
+ * test that boots `startDaemon()` against a temp dir — and the boot reaper
+ * killed what it did not recognise. Without an owner it recognised nothing that
+ * was not in its own database, so a test run killed every live worker on the
+ * developer's tmux server, twice per suite. The tag stays as the reaper's
+ * second check: a session on this socket that is not ours is still left alone.
  */
 export const TMUX_OWNER_VAR = "ORCA_OWNER";
 

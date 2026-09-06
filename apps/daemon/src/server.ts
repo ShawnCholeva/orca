@@ -276,7 +276,8 @@ import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
 import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
-import { defaultTmuxRunner } from './tmux/runner.js';
+import { defaultTmuxRunner, tmuxSocketPath } from './tmux/runner.js';
+import { stepWorkDoneSql } from './workflows/orchestrator/db-rows.js';
 import { reapOrphanTmuxSessions, workerSessionIdsForRun } from './sessions/reap-orphan-sessions.js';
 import { liveSessionSql } from './sessions/live-session.js';
 import { resolveAgentProvider } from './orchestrator-llm/providers/registry.js';
@@ -646,8 +647,14 @@ export function createServer(
     return { workflowRunId: row.workflow_run_id, stepRunId: row.step_run_id };
   }
 
+  // One tmux server per daemon, at a socket in its data dir: shadow sessions,
+  // workers and the boot reaper all address it, and nothing addresses the
+  // machine's shared server. See tmuxSocketPath.
+  const tmux = defaultTmuxRunner(tmuxSocketPath(config.dataDir));
+
   // Shadow session manager for the orchestrator-LLM (tmux-backed).
   const shadowSessions = new ShadowSessionManager({
+    tmux,
     shadowRoot: path.join(config.dataDir, "shadow"),
     authToken: config.getAuthToken(),
     hookResolverCommand: config.hookResolverCommand,
@@ -677,6 +684,7 @@ export function createServer(
 
   // Worker session manager for orchestrator-dispatched agent sessions (tmux-backed).
   const workerSessions = new WorkerSessionManager({
+    tmux,
     privateRoot: path.join(config.dataDir, "workers"),
     authToken: config.getAuthToken(),
     // Loopback OTLP receiver base; threaded into each worker so Claude/Codex emit
@@ -901,17 +909,17 @@ export function createServer(
           SELECT wr.id AS run_id, wr.goal_id, wr.current_step_run_id,
                  (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND ${liveSessionSql('s.status')} ORDER BY s.created_at DESC LIMIT 1) AS session_id,
                  (SELECT ws.pending_provider_recovery_json IS NOT NULL FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS provider_recovery_pending,
-                 (SELECT ws.finished_at IS NOT NULL FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS step_finished
+                 (SELECT ${stepWorkDoneSql('ws')} FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS step_work_done
           FROM workflow_runs wr
           WHERE wr.status = 'active'
-        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null; provider_recovery_pending: number | null; step_finished: number | null }>;
+        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null; provider_recovery_pending: number | null; step_work_done: number | null }>;
         return rows.map((r) => ({
           runId: r.run_id,
           goalId: r.goal_id,
           currentStepRunId: r.current_step_run_id,
           sessionId: r.session_id,
           providerRecoveryPending: r.provider_recovery_pending === 1,
-          stepFinished: r.step_finished === 1,
+          stepWorkDone: r.step_work_done === 1,
         }));
       },
       isSessionAlive: async (id) => {
@@ -1003,7 +1011,7 @@ export function createServer(
       // orca-worker/orca-shadow tmux sessions orphaned by a prior daemon
       // generation (tmux outlives the daemon; nothing else reaps them). Ordered
       // AFTER resume so a wanted worker is never killed out from under a reattach.
-      .then(() => reapOrphanTmuxSessions(defaultTmuxRunner(), db, config.dataDir))
+      .then(() => reapOrphanTmuxSessions(tmux, db, config.dataDir))
       .then((reaped) => {
         if (reaped.length > 0) {
           console.log(`[reap] killed ${reaped.length} orphaned tmux session(s): ${reaped.join(", ")}`);

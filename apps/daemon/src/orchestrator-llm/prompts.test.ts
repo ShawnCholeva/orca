@@ -18,6 +18,20 @@ describe("composeAgentInitialPrompt", () => {
     expect(out).toMatch(/problem.*string/);
   });
 
+  it("carries a revision the reader asked for when a fresh worker must pick the step up", () => {
+    const out = composeAgentInitialPrompt({
+      goalTitle: "Add dark mode",
+      goalIntent: "",
+      stepInstructions: "Interview the user.",
+      outputSchema: [{ key: "problem", type: "string", required: true }],
+      priorStepArtifacts: [],
+      revisionFeedback: "Tighten the success metric to a number.",
+    });
+    expect(out).toMatch(/# Revision requested/);
+    expect(out).toMatch(/Tighten the success metric to a number\./);
+    expect(out.indexOf("# Revision requested")).toBeLessThan(out.indexOf("# Step instructions"));
+  });
+
   it("includes bounded prior step artifacts", () => {
     const out = composeAgentInitialPrompt({
       goalTitle: "G",

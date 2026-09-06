@@ -9,9 +9,9 @@ describe("resumeActiveRuns", () => {
     const markRecoverySessionMissing = vi.fn(async () => undefined);
     await resumeActiveRuns({
       listActiveRuns: async () => [
-        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: "alive-1", providerRecoveryPending: false, stepFinished: false },
-        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: "dead-1", providerRecoveryPending: false, stepFinished: false },
-        { runId: "r3", goalId: "g3", currentStepRunId: "s3", sessionId: null, providerRecoveryPending: false, stepFinished: false },
+        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: "alive-1", providerRecoveryPending: false, stepWorkDone: false },
+        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: "dead-1", providerRecoveryPending: false, stepWorkDone: false },
+        { runId: "r3", goalId: "g3", currentStepRunId: "s3", sessionId: null, providerRecoveryPending: false, stepWorkDone: false },
       ],
       isSessionAlive, reattach, respawn, markRecoverySessionMissing,
     });
@@ -29,8 +29,8 @@ describe("resumeActiveRuns", () => {
       .mockResolvedValueOnce(undefined);
     await resumeActiveRuns({
       listActiveRuns: async () => [
-        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: null, providerRecoveryPending: false, stepFinished: false },
-        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: null, providerRecoveryPending: false, stepFinished: false },
+        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: null, providerRecoveryPending: false, stepWorkDone: false },
+        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: null, providerRecoveryPending: false, stepWorkDone: false },
       ],
       isSessionAlive: async () => false,
       reattach: async () => undefined,
@@ -46,7 +46,7 @@ describe("resumeActiveRuns", () => {
     const markRecoverySessionMissing = vi.fn(async () => undefined);
     await resumeActiveRuns({
       listActiveRuns: async () => [
-        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: "alive-1", providerRecoveryPending: true, stepFinished: false },
+        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: "alive-1", providerRecoveryPending: true, stepWorkDone: false },
       ],
       isSessionAlive: async (id) => id === "alive-1",
       reattach,
@@ -64,8 +64,8 @@ describe("resumeActiveRuns", () => {
     const markRecoverySessionMissing = vi.fn(async () => undefined);
     await resumeActiveRuns({
       listActiveRuns: async () => [
-        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: "dead-1", providerRecoveryPending: true, stepFinished: false },
-        { runId: "r3", goalId: "g3", currentStepRunId: "s3", sessionId: null, providerRecoveryPending: true, stepFinished: false },
+        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: "dead-1", providerRecoveryPending: true, stepWorkDone: false },
+        { runId: "r3", goalId: "g3", currentStepRunId: "s3", sessionId: null, providerRecoveryPending: true, stepWorkDone: false },
       ],
       isSessionAlive: async () => false,
       reattach,
@@ -87,8 +87,8 @@ describe("resumeActiveRuns", () => {
     const reattach = vi.fn(async () => undefined);
     await resumeActiveRuns({
       listActiveRuns: async () => [
-        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: null, providerRecoveryPending: false, stepFinished: true },
-        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: "alive-2", providerRecoveryPending: false, stepFinished: true },
+        { runId: "r1", goalId: "g1", currentStepRunId: "s1", sessionId: null, providerRecoveryPending: false, stepWorkDone: true },
+        { runId: "r2", goalId: "g2", currentStepRunId: "s2", sessionId: "alive-2", providerRecoveryPending: false, stepWorkDone: true },
       ],
       isSessionAlive: async (id) => id === "alive-2",
       reattach, respawn,

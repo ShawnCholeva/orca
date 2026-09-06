@@ -172,14 +172,14 @@ function recordingMediator(action: OrchestratorAction): Pick<OrchestratorMediato
 function makeJudgeService(
   mediator: Pick<OrchestratorMediator, "invoke">,
   workerDeliver: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">,
-  opts: { accumulator?: SessionCostAccumulator } = {}
+  opts: { accumulator?: SessionCostAccumulator; launcher?: WorkflowSessionLauncher } = {}
 ): OrchestratorService {
   const broker = fakeBrokerNoop();
   const operators = { async list() { return [agentOperatorDescriptor()]; } };
   const engine = new DispatchEngine(
     broker,
     operators,
-    makeLauncher(),
+    opts.launcher ?? makeLauncher(),
     fakeStepDispatch(),
     undefined,
     undefined,
@@ -2506,6 +2506,23 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     );
   });
 
+  it("respawnStepAgent leaves a step parked at its confirmation card alone", async () => {
+    // The work is done and stashed for the reader's OK. A daemon restart with the
+    // worker gone respawned it and the fresh worker redid the whole step under
+    // the card the reader was looking at.
+    const { db } = setupHarness();
+    setupFirstStepRun(db);
+    db.prepare(
+      "UPDATE workflow_step_runs SET selected_operator_id = 'agent:claude-code', operator_selected_at = ?, pending_completion_json = '{}' WHERE id = 'step-1'"
+    ).run(NOW);
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-respawn" }));
+    const { service } = makeAgentService(makeLauncher(launchFn));
+
+    await service.respawnStepAgent(db, () => NOW, "run-1", "step-1");
+
+    expect(launchFn).not.toHaveBeenCalled();
+  });
+
   it("advanceToNextStep on the terminal step yields complete_workflow_run, no further spawn", async () => {
     const { db } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" }); // single terminal step (ordinal 0)
@@ -2945,6 +2962,52 @@ describe("OrchestratorService.requestStepRevision / submitStepRevision", () => {
     // activity resumed (no longer paused at confirmation):
     const activities = listActivitiesByGoal(db, "goal-1");
     expect(activities.some((a) => a.sourceKind === "step_confirmation_pending")).toBe(false);
+  });
+});
+
+describe("OrchestratorService.submitStepRevision with the worker gone", () => {
+  it("relaunches the step with the revision in the fresh worker's prompt instead of dead-ending", async () => {
+    // A worker that died while its step sat at the confirmation card (machine
+    // reboot, tmux server gone) used to make Revise a dead end: "no step agent
+    // session is available", the stash already cleared, nothing left to click.
+    const { db, bus, idFactory } = setupHarness();
+    const deliver = vi.fn(async () => "delivered" as const);
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-fresh" }));
+    const service = makeJudgeService(
+      fakeMediator({
+        kind: "approve_step_complete",
+        scoring: {
+          reasoning: "ok", successScore: 0.8,
+          quality: { outputCompleteness: 0.8, outputCorrectness: 0.8, instructionAdherence: 0.8, downstreamReadiness: 0.8, riskLevel: 0.2 },
+          reason: "ok", handoffReady: true,
+        },
+      }),
+      deliver,
+      { launcher: makeLauncher(launchFn) }
+    );
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    setSupervisionMode(db, "supervised", NOW);
+    await service.onAgentResponseDone(
+      db, () => NOW,
+      { sessionId: "sess-judge", adapterId: "claude-code", responseText: "Done.\n```orca:step-complete\n" + JSON.stringify({ result: "implemented" }) + "\n```" },
+      { bus, idFactory }
+    );
+    db.prepare("UPDATE sessions SET status = 'exited', exited_at = ? WHERE id = 'sess-judge'").run(NOW);
+
+    await service.submitStepRevision(db, () => NOW, "run-1", "tighten the success metric", { bus, idFactory });
+
+    expect(launchFn).toHaveBeenCalledOnce();
+    const objective = (launchFn.mock.calls[0] as unknown as [{ objective: string }])[0].objective;
+    expect(objective).toMatch(/# Revision requested/);
+    expect(objective).toMatch(/tighten the success metric/);
+    expect(deliver).not.toHaveBeenCalledWith("sess-judge", expect.stringMatching(/tighten/));
+    const row = db.prepare("SELECT revise_attempts, pending_completion_json FROM workflow_step_runs WHERE id = 'step-1'").get() as { revise_attempts: number; pending_completion_json: string | null };
+    expect(row.revise_attempts).toBe(1);
+    expect(row.pending_completion_json).toBeNull();
+    const msgs = listOrchestratorMessagesByGoal(db, "goal-1");
+    expect(msgs.some((m) => /no step agent session is available/.test(m.body))).toBe(false);
   });
 });
 

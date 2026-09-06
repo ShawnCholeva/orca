@@ -19,6 +19,7 @@ const stepRun: StepRunRow = {
   crash_retries: 0,
   step_result_json: null,
   pending_provider_recovery_json: null,
+  pending_completion_json: null,
   pending_judge_json: null,
   pending_revision_json: null,
   pending_worker_question_id: null,

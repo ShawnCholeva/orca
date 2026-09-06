@@ -82,6 +82,7 @@ import {
   readStepRun,
   preferencesForGoal,
   goalSuccessCriteria,
+  stepWorkDone,
 } from "./db-rows.js";
 import {
   stepRunIdsByTemplateId,
@@ -1851,7 +1852,26 @@ export class OrchestratorService {
       );
       return { postedChatReply: true };
     }
-    if (!sessionId || !this.workerDeliver) {
+    if (!sessionId) {
+      // The worker is gone (it died under the confirmation card; the watchdog
+      // closed it as exited rather than a crash). A fresh worker has no context
+      // to receive feedback into, so relaunch the step with the revision in its
+      // prompt. Before this, the revision was refused with nothing left to click.
+      db.prepare("UPDATE workflow_step_runs SET revise_attempts = ? WHERE id = ?").run(
+        counter.nextAttempt,
+        ctx.stepRun.id
+      );
+      postOrchestratorMessage(
+        db,
+        now,
+        ctx.run.goalId,
+        "The step's agent is gone, so a new one is starting with your revision.",
+        options
+      );
+      await this.respawnStepAgent(db, now, ctx.run.id, ctx.stepRun.id, options, { revisionFeedback: feedback });
+      return { postedChatReply: true };
+    }
+    if (!this.workerDeliver) {
       postOrchestratorMessage(
         db,
         now,
@@ -2336,7 +2356,8 @@ export class OrchestratorService {
     now: () => string,
     runId: string,
     stepRunId: string,
-    options: RequestNextDecisionOptions = {}
+    options: RequestNextDecisionOptions = {},
+    opts: { revisionFeedback?: string } = {}
   ): Promise<void> {
     const run = getWorkflowRunById(db, runId);
     if (!run || run.status !== "active") return;
@@ -2346,11 +2367,12 @@ export class OrchestratorService {
       .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
       .get(stepRunId) as StepRunRow | undefined;
     if (!stepRun || stepRun.status !== "active") return;
-    // A step whose work is finished (the run parked on a human decision with this
+    // A step whose work is done (the run parked on a human decision with this
     // step as its cursor) has nothing for a worker to do. Respawning it redid
-    // finished work once per daemon restart. Guarded here, not only at the boot
-    // caller, so no future caller can relaunch a finished step either.
-    if (stepRun.finished_at) return;
+    // finished work once per daemon restart, and redid a whole step under its
+    // confirmation card. Guarded here, not only at the boot caller, so no future
+    // caller can relaunch such a step either.
+    if (stepWorkDone(stepRun)) return;
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
     const goal = db
@@ -2361,7 +2383,7 @@ export class OrchestratorService {
     if (!goal) return;
     // Recovery-driven respawn: the crashed worker's session row may still read
     // 'running', so bypass the live-session double-launch guard.
-    await this.engine.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options, { force: true });
+    await this.engine.spawnStepAgent(db, now, { run, stepRun, stepTpl, template, goal }, options, { force: true, ...opts });
   }
 
   /**

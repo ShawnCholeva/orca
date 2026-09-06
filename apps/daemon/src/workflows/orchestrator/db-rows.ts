@@ -27,10 +27,30 @@ export interface StepRunRow {
   crash_retries: number;
   step_result_json: string | null;
   pending_provider_recovery_json: string | null;
+  pending_completion_json: string | null;
   pending_judge_json: string | null;
   pending_revision_json: string | null;
   pending_worker_question_id: string | null;
   pending_worker_answer_json: string | null;
+}
+
+/**
+ * The step's work is done and the run is parked on a human decision with the
+ * step as its cursor: `finished_at` set (mark-done, a judge retry, a recovery
+ * choice) or its completion stashed for the reader's OK (the confirmation
+ * card). Nothing there is a worker's to do, so a worker found gone is
+ * bookkeeping, not a crash, and nothing respawns one: a respawn redid the whole
+ * step under the card the reader was looking at, once per daemon restart.
+ * Boot resume, the liveness watchdog and the respawn guard share this one
+ * predicate; a revise on a card whose worker is gone relaunches deliberately,
+ * with the revision in the fresh worker's prompt.
+ */
+export function stepWorkDoneSql(alias: string): string {
+  return `(${alias}.finished_at IS NOT NULL OR ${alias}.pending_completion_json IS NOT NULL)`;
+}
+
+export function stepWorkDone(row: Pick<StepRunRow, "finished_at" | "pending_completion_json">): boolean {
+  return row.finished_at !== null || row.pending_completion_json !== null;
 }
 
 export class OrchestratorStepNotFoundError extends Error {

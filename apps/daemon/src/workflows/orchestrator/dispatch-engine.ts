@@ -395,7 +395,7 @@ export class DispatchEngine {
       goal: GoalRow;
     },
     options: RequestNextDecisionOptions,
-    opts: { force?: boolean } = {}
+    opts: { force?: boolean; revisionFeedback?: string } = {}
   ): Promise<void> {
     if (!this.stepDispatch) throw new Error("step dispatch capabilities not configured");
     if (!opts.force) {
@@ -435,6 +435,7 @@ export class DispatchEngine {
       outputSchema: ctx.stepTpl.outputSchema,
       priorStepArtifacts: collectPriorStepArtifacts(db, ctx.run.id, ctx.stepRun.id),
       repairContext: latestRejectingGate(db, ctx.run.id),
+      revisionFeedback: opts.revisionFeedback,
       workspaces: workspaceRows.map((w) => ({ name: w.name, root: w.path })),
       documents: documentRows.map((d) => ({ name: d.name, ref: d.ref, content: d.content, truncated: d.truncated === 1 })),
     });

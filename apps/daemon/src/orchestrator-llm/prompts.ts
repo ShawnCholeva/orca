@@ -10,6 +10,8 @@ export interface AgentInitialPromptInput {
   outputSchema: WorkflowStepOutputSchema;
   priorStepArtifacts: Array<{ stepId: string; outputJson: unknown }>;
   repairContext?: { reason: string; issueRefs: string[] } | null;
+  /** A revision the reader asked for on a prior attempt whose worker is gone. */
+  revisionFeedback?: string;
   workspaces?: Array<{ name: string; root: string }>;
   documents?: Array<{ name: string; ref: string; content: string; truncated: boolean }>;
 }
@@ -63,6 +65,14 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
         ...(repair.issueRefs.length > 0 ? [`Issue refs: ${repair.issueRefs.join(", ")}`] : []),
       ]
     : [];
+  const revisionSection = input.revisionFeedback
+    ? [
+        "",
+        "# Revision requested",
+        "A previous attempt at this step reached its confirmation checkpoint and the reader asked for a revision before accepting it. The previous session is gone; redo the step with this addressed:",
+        input.revisionFeedback,
+      ]
+    : [];
   const workspaceBlock = input.workspaces && input.workspaces.length > 0
     ? ["", "# Workspaces", ...input.workspaces.map((w) => `- ${w.name}: ${w.root}`)]
     : [];
@@ -72,6 +82,7 @@ export function composeAgentInitialPrompt(input: AgentInitialPromptInput): strin
     input.goalTitle,
     ...(goalIntent ? ["", goalIntent] : []),
     ...repairSection,
+    ...revisionSection,
     ...workspaceBlock,
     ...documentBlock,
     "",

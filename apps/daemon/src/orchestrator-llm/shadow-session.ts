@@ -7,6 +7,7 @@ import type { AgentProvider } from "./providers/types.js";
 import {
   type TmuxRunner,
   defaultTmuxRunner,
+  tmuxSocketPath,
   newSession,
   capturePane,
   paste,
@@ -100,7 +101,7 @@ export class ShadowSessionManager {
   private readonly tmux: TmuxRunner;
 
   constructor(private readonly deps: ShadowSessionDeps) {
-    this.tmux = deps.tmux ?? defaultTmuxRunner();
+    this.tmux = deps.tmux ?? defaultTmuxRunner(tmuxSocketPath(dirname(deps.shadowRoot)));
   }
 
   has(goalId: string): boolean { return this.sessions.has(goalId); }

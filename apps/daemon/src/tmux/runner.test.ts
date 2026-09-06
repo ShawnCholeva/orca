@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { capturePane, killSession, listSessions, newSession, paste, sendEnter, sendKey, sessionOwner, type TmuxRunner } from "./runner.js";
+import { execFile } from "node:child_process";
+import {
+  capturePane, defaultTmuxRunner, killSession, listSessions, newSession, paste, sendEnter, sendKey, sessionOwner,
+  tmuxSocketPath, type TmuxRunner,
+} from "./runner.js";
+
+vi.mock("node:child_process", () => ({
+  execFile: vi.fn((_bin: string, _args: string[], _opts: unknown, cb: (e: null, out: string, err: string) => void) => {
+    cb(null, "", "");
+    return { stdin: { end: () => undefined } };
+  }),
+}));
 
 function fakeRunner(stdout = ""): TmuxRunner & { calls: string[][] } {
   const calls: string[][] = [];
@@ -8,6 +19,23 @@ function fakeRunner(stdout = ""): TmuxRunner & { calls: string[][] } {
     run: vi.fn(async (args: string[]) => { calls.push(args); return { stdout, stderr: "", code: 0 }; }),
   } as TmuxRunner & { calls: string[][] };
 }
+
+describe("tmux socket isolation", () => {
+  it("each data dir owns a socket beside its database", () => {
+    expect(tmuxSocketPath("/Users/dev/.orca")).toBe("/Users/dev/.orca/tmux.sock");
+  });
+
+  it("the default runner addresses every command at the daemon's own socket, never the shared server", async () => {
+    const r = defaultTmuxRunner("/Users/dev/.orca/tmux.sock");
+    await r.run(["list-sessions", "-F", "#{session_name}"]);
+    await r.run(["kill-session", "-t", "orca-worker-1"]);
+    const calls = vi.mocked(execFile).mock.calls.map((c) => [c[0], c[1]]);
+    expect(calls).toEqual([
+      ["tmux", ["-S", "/Users/dev/.orca/tmux.sock", "list-sessions", "-F", "#{session_name}"]],
+      ["tmux", ["-S", "/Users/dev/.orca/tmux.sock", "kill-session", "-t", "orca-worker-1"]],
+    ]);
+  });
+});
 
 describe("tmux runner helpers", () => {
   it("capturePane returns pane stdout", async () => {

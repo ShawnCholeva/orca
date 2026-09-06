@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
-  defaultTmuxRunner, newSession, capturePane, sendEnter, sendKey, paste, pipePaneToFile, killSession, hasSession,
+  defaultTmuxRunner, tmuxSocketPath, newSession, capturePane, sendEnter, sendKey, paste, pipePaneToFile, killSession, hasSession,
   type TmuxRunner,
   TMUX_OWNER_VAR,
 } from "../../tmux/runner.js";
@@ -129,7 +129,7 @@ export class WorkerSessionManager {
   private readonly tails = new Map<string, WorkerTail>();
   private readonly tmux: TmuxRunner;
   constructor(private readonly deps: WorkerSessionDeps) {
-    this.tmux = deps.tmux ?? defaultTmuxRunner();
+    this.tmux = deps.tmux ?? defaultTmuxRunner(tmuxSocketPath(this.owner()));
   }
 
   private name(sessionId: string): string { return `orca-worker-${sessionId}`; }

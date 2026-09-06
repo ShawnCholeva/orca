@@ -96,6 +96,8 @@ Hooks: https://developers.openai.com/codex/hooks
 
 There is a live daemon running in a tmux session named daemon-terminal if you need to interact with the logs directly
 
+Worker and shadow sessions live on the daemon's own tmux server, not the default one: `tmux -S ~/.orca/tmux.sock ls` lists them, and every `attach`/`capture-pane` on one needs the same `-S` flag.
+
 ## Driving the app in a browser (Claude interaction)
 
 The desktop frontend is a normal web app: in Tauri it gets the daemon URL+token

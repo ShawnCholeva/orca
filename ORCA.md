@@ -173,7 +173,7 @@ How an agent turn is dispatched is an **execution mode**, configured per-adapter
 
 Mode resolution: the dispatcher uses the adapter's preferred enabled mode, falls back to other enabled modes on failure, and never attempts a disabled mode. Adapter capability (`supportedExecutionModes`) is declared in code; the enabled/disabled split lives in the DB and is seeded at boot.
 
-**tmux** is the mechanism for spawning worker agent sessions out-of-process so their PTYs are inspectable and survivable; `tmux/runner.ts` wraps it (env via `-e`, idempotent kill-then-create).
+**tmux** is the mechanism for spawning worker agent sessions out-of-process so their PTYs are inspectable and survivable; `tmux/runner.ts` wraps it (env via `-e`, idempotent kill-then-create). Each daemon runs its own tmux server at `<dataDir>/tmux.sock` (`tmuxSocketPath`), so no daemon — a second data dir, a test booting `startDaemon()` against a temp dir — can see, let alone kill, another's sessions; the `ORCA_OWNER` session tag remains the reaper's second check. Inspect the live daemon's sessions with `tmux -S ~/.orca/tmux.sock ls`.
 
 ---
 
@@ -263,7 +263,7 @@ Prereqs: Node 20+, pnpm (via Corepack), Rust toolchain for Tauri, OS-specific Ta
 
 ### Debugging the daemon
 
-A live daemon runs in a tmux session named **`daemon-terminal`** — attach to read logs directly. Worker agent sessions also run under tmux.
+A live daemon runs in a tmux session named **`daemon-terminal`** — attach to read logs directly. Worker agent sessions also run under tmux, on the daemon's own server: `tmux -S ~/.orca/tmux.sock ls` / `attach -t orca-worker-<sessionId>`.
 
 ---
 

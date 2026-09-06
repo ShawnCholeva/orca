@@ -304,6 +304,31 @@ describe("livenessWatchdogTick", () => {
     expect(launch).not.toHaveBeenCalled();
   });
 
+  it("closes a dead worker on a step parked at its confirmation card as exited — the card is the reader's, not a crash", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, stepRunId } = seedRunningWorkerStep(db, { withStepOutput: true });
+    db.prepare("UPDATE workflow_step_runs SET pending_completion_json = '{}' WHERE id = ?").run(stepRunId);
+    const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({ sessionId: "respawn-1" }));
+    const { completions } = makeServiceWithSubscriber(db, bus, idFactory, launch);
+
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => false,
+      now: () => NOW,
+      graceMs: GRACE_MS,
+      stallMs: STALL_MS,
+      progress: new Map<string, ProgressMark>(),
+    });
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(sessionStatus(db, sessionId)).toBe("exited");
+    expect(crashRetries(db, stepRunId)).toBe(0);
+    expect(launch).not.toHaveBeenCalled();
+    expect(completions).toHaveLength(0);
+    const stash = db.prepare("SELECT pending_completion_json FROM workflow_step_runs WHERE id = ?").get(stepRunId) as { pending_completion_json: string | null };
+    expect(stash.pending_completion_json).toBe("{}");
+  });
+
   it("closes a dead worker on a FINISHED step as exited — no failure, no crash retry, no respawn", async () => {
     // The run is parked on a human with a finished step as its cursor; the worker's
     // tmux is gone. Four such rows sat at `running` for days on one step, because
