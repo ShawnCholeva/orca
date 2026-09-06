@@ -31,7 +31,14 @@ import { EventBus } from "../../events.js";
 import { listGoalDocumentsByGoal } from "../../goal-documents/projection.js";
 import { refreshGoalDocuments } from "../../goal-documents/usecases.js";
 
+// Retry a little after the provider's own reset time, not on it: the reset is
+// quoted to the minute and the first request after it can still be refused.
+const AUTO_RETRY_GRACE_MS = 30_000;
+
 export class ProviderRecoveryController {
+  /** Armed automatic retries, by step run id. In-memory; re-armed from checkpoints at boot. */
+  private readonly autoRetries = new Map<string, ReturnType<typeof setTimeout>>();
+
   constructor(
     private readonly deps: {
       runner: RunnerPort;
@@ -142,6 +149,73 @@ export class ProviderRecoveryController {
       });
       throw err;
     }
+    this.armAutoRetry(db, now, runId, stepRun.id, { ...checkpoint, mode: "waiting" }, options);
+  }
+
+  /**
+   * "Wait for Claude Code" used to wait for nothing: the session was preserved
+   * and the reset time shown, and when it passed the run stayed parked until a
+   * human clicked Retry. Waiting is the control plane's job — a reset time is a
+   * known instant, and the retry is deterministic — so arm it here and take the
+   * same action the button takes. A checkpoint with no reset time cannot be
+   * timed and keeps the manual button.
+   */
+  private armAutoRetry(
+    db: Database.Database,
+    now: () => string,
+    runId: string,
+    stepRunId: string,
+    checkpoint: ProviderRecoveryCheckpoint,
+    options: RequestNextDecisionOptions
+  ): void {
+    this.clearAutoRetry(stepRunId);
+    if (checkpoint.mode !== "waiting" || checkpoint.resetAt === null) return;
+    const delay = Math.max(0, Date.parse(checkpoint.resetAt) - Date.parse(now())) + AUTO_RETRY_GRACE_MS;
+    const timer = setTimeout(() => {
+      this.autoRetries.delete(stepRunId);
+      this.retryProvider(db, now, runId, checkpoint.id, options).catch((err) => {
+        // The card's Retry stays available; the failure is recorded on the
+        // checkpoint by retryProvider itself where it can be.
+        console.error("[provider-recovery] automatic retry failed", stepRunId, err instanceof Error ? err.message : err);
+      });
+    }, delay);
+    timer.unref?.();
+    this.autoRetries.set(stepRunId, timer);
+    console.log(`[provider-recovery] automatic retry armed for step ${stepRunId} in ${Math.round(delay / 1000)}s`);
+  }
+
+  private clearAutoRetry(stepRunId: string): void {
+    const t = this.autoRetries.get(stepRunId);
+    if (t !== undefined) clearTimeout(t);
+    this.autoRetries.delete(stepRunId);
+  }
+
+  /** How many automatic retries are armed — for tests and diagnostics. */
+  armedAutoRetries(): number {
+    return this.autoRetries.size;
+  }
+
+  /**
+   * Timers die with the process. On boot, every checkpoint still `waiting` with
+   * a reset time is re-armed from the row, so a restart (or a closed lid) between
+   * Wait and the reset does not turn the wait back into a manual one.
+   */
+  armAutoRetriesOnBoot(db: Database.Database, now: () => string, options: RequestNextDecisionOptions): number {
+    const rows = db
+      .prepare(
+        `SELECT id AS step_run_id, workflow_run_id, pending_provider_recovery_json AS recovery
+         FROM workflow_step_runs
+         WHERE pending_provider_recovery_json IS NOT NULL AND status = 'active'`
+      )
+      .all() as Array<{ step_run_id: string; workflow_run_id: string; recovery: string }>;
+    let armed = 0;
+    for (const row of rows) {
+      const parsed = ProviderRecoveryCheckpoint.safeParse(JSON.parse(row.recovery));
+      if (!parsed.success || parsed.data.mode !== "waiting" || parsed.data.resetAt === null) continue;
+      this.armAutoRetry(db, now, row.workflow_run_id, row.step_run_id, parsed.data, options);
+      armed += 1;
+    }
+    return armed;
   }
 
   /**
@@ -163,6 +237,8 @@ export class ProviderRecoveryController {
         `Retry is only allowed while waiting (mode: ${checkpoint.mode}).`
       );
     }
+    // Whether a human or the timer got here first, the other must not fire.
+    this.clearAutoRetry(stepRun.id);
     if (
       checkpoint.retryKind === "preserved_session" &&
       checkpoint.resetAt !== null &&

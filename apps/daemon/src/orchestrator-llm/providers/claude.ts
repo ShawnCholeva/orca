@@ -16,6 +16,13 @@ import type { TmuxRunner } from "../../tmux/runner.js";
 
 const CLAUDE_SESSION_LIMIT =
   /hit your session limit|session limit[\s\S]{0,80}resets/i;
+// The CLI's usage WARNING — "You've used 91% of your session limit · resets
+// 1:50am" — shares every word the loose branch above keys on, and it prints
+// while the agent is working normally. Taken for a limit hit, it parked a step
+// on provider recovery under a worker that went on to finish its turn and ask
+// the user a question; the false card sat below the real one for twenty minutes.
+// Strip the warning before testing, so a real hit in the same tail still counts.
+const CLAUDE_USAGE_WARNING = /used \d{1,3}% of your session limit[^\r\n]*/gi;
 const CLAUDE_RESET = /resets\s+(\d{1,2}:\d{2}\s*(?:am|pm))(?:\s*\(([^)]+)\))?/i;
 
 function resolveNextZonedTime(clockText: string, timezone: string, detectedAt: Date): string | null {
@@ -97,7 +104,8 @@ function resolveNextZonedTime(clockText: string, timezone: string, detectedAt: D
   return new Date(resetMs).toISOString();
 }
 
-function parseClaudeSessionLimit(text: string, detectedAt = new Date()): ProviderTerminalFailure | null {
+function parseClaudeSessionLimit(rawText: string, detectedAt = new Date()): ProviderTerminalFailure | null {
+  const text = rawText.replace(CLAUDE_USAGE_WARNING, "");
   if (!CLAUDE_SESSION_LIMIT.test(text)) return null;
   const match = text.match(CLAUDE_RESET);
   const clockText = match?.[1]?.replace(/\s+/g, "") ?? null;
@@ -266,7 +274,12 @@ export class ClaudeAgentProvider implements AgentProvider {
       // is line-anchored to the glyph so ellipsis words inside response text
       // (indented / after ⏺) cannot false-positive, and completed-turn lines
       // ("✻ Cooked for 4s") carry no ellipsis.
-      detectTurnStarted: (text) => /esc to interrupt/i.test(text) || /^[✳✢✽✻·∗+*x]\s+\S+…/mu.test(text),
+      // A live pane arrives as carriage-return-separated redraws ("\r✻Musing…3\r"),
+      // not newline-separated lines: the glyph follows \r with no space before the
+      // word. Anchoring on \n alone and requiring a space matched a captured pane
+      // zero times across a whole turn, which is why a preserved-session retry was
+      // never seen to start.
+      detectTurnStarted: (text) => /esc to interrupt/i.test(text) || /(?:^|[\r\n])[✳✢✽✻·∗+*x]\s*\S+…/u.test(text),
     };
   }
 

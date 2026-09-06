@@ -54,6 +54,12 @@ const COMPLETED_WITH_ELLIPSIS_BODY = [
 describe("ClaudeAgentProvider.turnParser().detectTurnStarted", () => {
   const detect = new ClaudeAgentProvider().turnParser().detectTurnStarted!;
 
+  it("detects the spinner in a live pane's carriage-return redraws (no newline, no space)", () => {
+    // Captured from a worker pane mid-turn: redraws separated by \r, glyph glued
+    // to the gerund. This is what onSessionOutputChunk actually receives.
+    expect(detect("\r \r1\r8\r✻Musing…3\r✶5\r✳7\r✢8\r⏺\r60\r·Musing…2\r")).toBe(true);
+  });
+
   it("detects the current CLI's running spinner (no 'esc to interrupt' rendered)", () => {
     expect(detect(RUNNING_PANE)).toBe(true);
   });

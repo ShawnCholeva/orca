@@ -43,6 +43,15 @@ describe("resolveAgentProvider", () => {
     expect(failure).toMatchObject({ code: "session_limit", message: expect.stringMatching(/session limit/i) });
   });
 
+  it("does not mistake the usage WARNING for a limit hit, but still sees a real hit beside it", () => {
+    // Captured from a live worker pane: printed at 91% while the agent kept working.
+    const warning = "\r✢\rYou've used 91% of your session limit · resets 1:50am (America/Chicago) · /upgrade to keep using Claude Code\r \r✳";
+    const parser = resolveAgentProvider("claude-code").turnParser();
+    expect(parser.detectError?.(warning)).toBeNull();
+    const hit = warning + "\nYou've hit your session limit · resets 1:50am (America/Chicago)";
+    expect(parser.detectError?.(hit, new Date("2026-09-06T06:32:00.000Z"))).toMatchObject({ code: "session_limit" });
+  });
+
   it("parses Claude session-limit reset time with timezone", () => {
     const failure = resolveAgentProvider("claude-code")
       .turnParser()

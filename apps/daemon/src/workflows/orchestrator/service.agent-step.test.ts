@@ -3381,6 +3381,30 @@ describe("OrchestratorService provider recovery actions", () => {
     expect(lastOrchestratorMessageBody(db)).toContain("Saved this guidance");
   });
 
+  it("user chat during a preserved-session RETRY → delivered to the live worker, not stashed", async () => {
+    // The retry has already nudged the worker, so it is at its prompt (or
+    // mid-turn), not limited. Stashing here promised delivery "when retried" —
+    // a retry that had already happened — and a user's answer to the worker's
+    // own question sat in the checkpoint while the worker idled for it.
+    const { db, bus, idFactory } = setupHarness();
+    seedRecoveryCheckpoint(db, { mode: "retrying", retryKind: "preserved_session" });
+    const deliver = vi.fn(async () => "delivered" as const);
+    const mediator = spyMediator({ kind: "forward_to_agent", translated: "x" });
+    db.prepare(
+      "UPDATE goals SET orchestrator_provider = 'orca/anthropic', orchestrator_model = 'claude-haiku-4-5' WHERE id = 'goal-1'"
+    ).run();
+    const brokerPG = fakeBrokerNoop();
+    const operatorsPG = { async list() { return [agentOperatorDescriptor()]; } };
+    const enginePG = new DispatchEngine(brokerPG, operatorsPG, makeLauncher(), fakeStepDispatch(), undefined, undefined, undefined);
+    const service = new OrchestratorService(enginePG, brokerPG, operatorsPG, multiOutputStore({}), fakeStepDispatch(), mediator, deliver);
+
+    await service.onUserMessage(db, () => NOW, { goalId: "goal-1", body: "Assert the actual float." }, { bus, idFactory });
+
+    expect(deliver).toHaveBeenCalledWith("sess-cur", "Assert the actual float.");
+    expect(readCheckpoint(db)?.pendingGuidance).toEqual([]);
+    expect(lastOrchestratorMessageBody(db)).toContain("Sent to the agent");
+  });
+
   it("pendingGuidance retains newest 20 and bounds each item to 4000 chars", async () => {
     const { db, bus, idFactory } = setupHarness();
     const existing = Array.from({ length: 20 }, (_v, i) => `g${i}`);

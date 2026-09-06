@@ -2126,6 +2126,18 @@ export class OrchestratorService {
         JSON.parse(stepRun.pending_provider_recovery_json)
       );
       const item = args.body.slice(0, 4000);
+      // A preserved-session retry has already nudged the worker: it is live at
+      // its prompt or mid-turn, not limited. Stashing here promised delivery
+      // "when the provider is retried" — a retry that had already happened — so
+      // a user's answer sat in the checkpoint while the worker idled, waiting
+      // for exactly that answer. Deliver now; stash only if delivery fails.
+      if (checkpoint.mode === "retrying" && checkpoint.retryKind === "preserved_session") {
+        const delivered = await this.workerDeliver?.(checkpoint.currentSessionId, item).catch(() => "no_session" as const);
+        if (delivered === "delivered") {
+          postOrchestratorMessage(db, now, run.goalId, "Sent to the agent, which is back in its session.", options);
+          return;
+        }
+      }
       const pendingGuidance = [...checkpoint.pendingGuidance, item].slice(-20);
       db.prepare(
         "UPDATE workflow_step_runs SET pending_provider_recovery_json = ? WHERE id = ?"

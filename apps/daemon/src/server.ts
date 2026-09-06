@@ -852,6 +852,10 @@ export function createServer(
     operators: daemonContext.operatorRegistry,
     stepDispatch: daemonContext.stepDispatchCapabilities,
   });
+  if (deps?.resumeActiveRunsOnBoot) {
+    const armed = recoveryController.armAutoRetriesOnBoot(db, daemonContext.now, { bus: eventBus, idFactory: daemonContext.idFactory });
+    if (armed > 0) console.log(`[provider-recovery] re-armed ${armed} automatic retr${armed === 1 ? "y" : "ies"} from checkpoints`);
+  }
 
   // Get an agent back onto a step run: prefer reattaching a surviving tmux
   // worker over spawning a fresh one, otherwise dispatch via the orchestrator
