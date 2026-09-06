@@ -5,6 +5,11 @@ Delivery, supervised, driven through the browser build. Found while verifying H1
 (PostToolUse) and A2 part 2 (park-time notification) on a real worker. **Status:
 `open` unless stated.** Rows are removed once fixed and verified.
 
+**Outcome:** the run reached Done at 07:50:55 — Triage → Proposal → Critique (approved)
+→ Execution → Verify (approved) → Done → mark-done — with commit `764640d` in
+orca-scratch, a clean tree, every worker torn down and no tmux session left behind.
+Every fix below except R2 was exercised by the same run after it landed.
+
 | # | Issue | Status | Notes |
 |---|---|---|---|
 | R1 | **"Wait for Claude Code" waits for nothing.** Choosing Wait preserves the session and shows the reset time, but when the reset passes the run stays parked until a human clicks Retry. The card's copy ("will be preserved while waiting") reads as "Orca will continue"; it does not. Observed: reset 1:50am, still parked at 1:52am with Retry enabled and no retry attempted. | **FIXED** — Wait arms a retry 30s after `resetAt`, the same action the button takes; a human Retry disarms it; checkpoints still `waiting` are re-armed at boot. Awaiting a live occurrence to verify. |
