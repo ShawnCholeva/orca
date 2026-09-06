@@ -5,8 +5,8 @@ import { formatDuration } from "./interval-bar";
 import { PROMPT_KIND, modelName, terminatedRuns, tokens } from "./RunLedger";
 import { WorkflowDropdown, type WorkflowChoice } from "./StepPerformance";
 import {
-  BarList, Big, CountRow, CoverageMatrix, Donut, Panel, Scatter, SectionHeading, StackedRows, gridStyle,
-  type BarItem, type CoverageRow, type StackedRow,
+  BarList, Big, CountRow, CoverageMatrix, Donut, Panel, SectionHeading, StackedRows, TimeBars, gridStyle,
+  type BarItem, type CoverageRow, type StackedRow, type TimeBucket,
 } from "./dashboard-panels";
 
 // The Workflows dashboard.
@@ -84,8 +84,8 @@ export interface Loaded {
   gatesCoverEveryVersion?: boolean;
   /** The period the gate-node lines were fetched for, so the caption can name it. */
   gatesPeriod?: MetricPeriod;
-  /** The chosen window and step — what the time panels are drawn with. */
-  window?: { fromMs: number; toMs: number };
+  /** The chosen window and step — what the time panels are drawn with. Absent means no time panels. */
+  window?: { fromMs: number; toMs: number } | null;
   intervalMs?: number;
 }
 interface StepAgg {
@@ -119,7 +119,7 @@ interface StepAgg {
 
 export function aggregate({
   runs, details, gates = null, gatesCoverEveryVersion = false, gatesPeriod = "30d",
-  window = { fromMs: 0, toMs: Number.MAX_SAFE_INTEGER }, intervalMs = HOUR,
+  window = null, intervalMs = HOUR,
 }: Loaded) {
   // Sums are computed over runs that ENDED. A live run's elapsed and parked clocks are
   // still accruing, so including it makes a total that changes on reload with no work
@@ -240,9 +240,13 @@ export function aggregate({
   // When the harness failed, inside the window. Events are ROWS, not sums, so a
   // live run's events count — a relaunch at 04:10 is a fact whether or not the run
   // has ended — and only the window decides what is drawn.
+  //
+  // No window means no time panels: the sentinel "from the epoch to forever" was
+  // tried and it asked the bucketer for eight million hourly buckets. Absence is
+  // absence, not an infinite range.
   const harnessErrors = details
     .flatMap((d) => d.harnessErrors.map((e) => ({ ...e, goalTitle: d.run.goalTitle })))
-    .filter((e) => { const t = Date.parse(e.at); return t >= window.fromMs && t <= window.toMs; })
+    .filter((e) => { if (window === null) return true; const t = Date.parse(e.at); return t >= window.fromMs && t <= window.toMs; })
     .sort((a, b) => a.at.localeCompare(b.at));
 
   // What the policy stopped, by the reason it gave. A decision can carry several
@@ -561,34 +565,32 @@ export function Dashboard({ agg }: { agg: Agg }) {
           </div>
         </Panel>
 
-        <Panel title="Harness errors" span={12}>
-          {/* WHEN the harness failed, on the chosen window at the chosen step. Three
-              kinds, one row each: a worker crashing and being relaunched, a completion
-              failing with a code that names the substrate, and the run being killed.
-              A workflow veto is not here — that is the workflow deciding. */}
-          <Scatter
-            fromMs={agg.window.fromMs}
-            toMs={agg.window.toMs}
-            intervalMs={agg.intervalMs}
-            rows={[
-              { key: "crash_relaunch", label: "worker crashed, relaunched" },
-              { key: "infra_failure", label: "failed inside the harness" },
-              { key: "run_killed", label: "run stopped by the harness" },
-            ]}
-            points={agg.harnessErrors.map((e) => ({
-              rowKey: e.kind,
-              atMs: Date.parse(e.at),
-              title: `${new Date(e.at).toLocaleString()} · ${e.goalTitle}${e.stepName ? ` · ${e.stepName}` : ""}${e.detail ? ` · ${e.detail}` : ""}`,
-            }))}
-          />
-          {agg.harnessErrors.length > 0 && (
-            <CountRow items={[
-              { label: "relaunches after a crash", value: String(agg.harnessErrors.filter((e) => e.kind === "crash_relaunch").length) },
-              { label: "failures inside the harness", value: String(agg.harnessErrors.filter((e) => e.kind === "infra_failure").length) },
-              { label: "runs stopped by the harness", value: String(agg.harnessErrors.filter((e) => e.kind === "run_killed").length) },
-            ]} />
-          )}
-        </Panel>
+        {/* WHEN the harness failed, one panel per kind, each a count per interval
+            across the chosen window. Three kinds: a worker crashing and being
+            relaunched, a completion failing with a code that names the substrate,
+            and the run being killed. A workflow veto is not here — that is the
+            workflow deciding. Split by kind rather than stacked, because the three
+            are different events with different remedies and a stack would invite
+            adding them. */}
+        {agg.window !== null && ([
+          { kind: "crash_relaunch", title: "Worker crashes", unit: { one: "relaunch after a crash", many: "relaunches after a crash" } },
+          { kind: "infra_failure", title: "Failures inside the harness", unit: { one: "failure", many: "failures" } },
+          { kind: "run_killed", title: "Runs stopped by the harness", unit: { one: "run stopped", many: "runs stopped" } },
+        ] as const).map(({ kind, title, unit }) => {
+          const times = agg.harnessErrors.filter((e) => e.kind === kind).map((e) => Date.parse(e.at));
+          const window = agg.window!;
+          return (
+            <Panel key={kind} title={title} span={4}
+                   right={<span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)" }}>{times.length}</span>}>
+              <TimeBars
+                buckets={bucketize(times, window.fromMs, window.toMs, agg.intervalMs)}
+                fromMs={window.fromMs}
+                toMs={window.toMs}
+                unit={unit}
+              />
+            </Panel>
+          );
+        })}
 
         {/* One row per harness revision. Pooling v13 with v16 hides the one
             comparison the page exists to support — whether the revision changed
@@ -988,6 +990,26 @@ export function defaultIntervalFor(rangeKey: string): string {
     if (d < bd || (d === bd && o.ms > best.ms)) best = o;
   }
   return best.key;
+}
+
+/**
+ * Counts per interval across a window, snapped to the reader's clock: buckets run
+ * from the local midnight on or before the window opens, so a window opened at
+ * 17:22 still counts by whole hours and whole days. The first and last buckets
+ * may be partial; they are kept, clipped by the chart, rather than dropped or
+ * padded. Every bucket the window touches is present, zeros included — a zero is
+ * the observation that nothing happened.
+ */
+export function bucketize(timesMs: number[], fromMs: number, toMs: number, intervalMs: number): TimeBucket[] {
+  const origin = new Date(fromMs);
+  origin.setHours(0, 0, 0, 0);
+  const out: TimeBucket[] = [];
+  for (let start = origin.getTime(); start < toMs; start += intervalMs) {
+    const end = start + intervalMs;
+    if (end <= fromMs) continue;
+    out.push({ startMs: start, endMs: end, count: timesMs.filter((t) => t >= start && t < end).length });
+  }
+  return out;
 }
 
 export function withinWindow(runs: RunSummary[], key: string, nowMs: number): RunSummary[] {

@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Intervention, RunDetail, RunSummary, RunTraceSpan, TemplateMetricsDetail } from "@orca/contracts";
-import { Dashboard, RANGES, WorkflowRollup, aggregate, defaultIntervalFor, gatePeriodFor, intervalsFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
+import { Dashboard, RANGES, WorkflowRollup, aggregate, bucketize, defaultIntervalFor, gatePeriodFor, intervalsFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
 import * as api from "../api";
-import { Donut, Scatter } from "./dashboard-panels";
+import { Donut, TimeBars } from "./dashboard-panels";
 
 // Real timers restored here as well as in the tests: a failing assertion would
 // otherwise leave the next test on a faked clock, and useFakeTimers does not move
@@ -784,67 +784,66 @@ describe("when the harness failed", () => {
       ["2026-09-01T12:00:00.000Z", "run_killed"],
     ]);
     const { container } = render(<Dashboard agg={a} />);
-    expect(container.textContent).toContain("Harness errors");
-    expect(container.querySelectorAll("[data-dot]")).toHaveLength(2);
+    // One panel per kind, each carrying its own total.
+    expect(container.textContent).toContain("Worker crashes");
+    expect(container.textContent).toContain("Failures inside the harness");
+    expect(container.textContent).toContain("Runs stopped by the harness");
+    const counted = [...container.querySelectorAll("[data-bar]")].map((r) => Number(r.getAttribute("data-count")));
+    expect(counted.reduce((x, n) => x + n, 0)).toBe(2);
   });
 
-  it("says the window is empty rather than drawing an empty axis", () => {
-    const a = aggregate({ runs: [run({ terminationCause: "completed" })], details: [] });
+  it("says a kind's window is empty rather than drawing an empty axis", () => {
+    const from = Date.parse("2026-09-01T00:00:00.000Z");
+    const a = aggregate({ runs: [run({ terminationCause: "completed" })], details: [], window: { fromMs: from, toMs: from + 24 * 3_600_000 }, intervalMs: 3_600_000 });
     const { container } = render(<Dashboard agg={a} />);
-    expect(container.textContent).toContain("Nothing recorded in this window");
-    expect(container.querySelectorAll("[data-dot]")).toHaveLength(0);
+    expect((container.textContent?.match(/Nothing recorded in this window/g) ?? []).length).toBe(3);
+    expect(container.querySelectorAll("[data-bar]")).toHaveLength(0);
   });
 });
 
-describe("the scatter is drawn with the window and the step", () => {
-  const rows = [{ key: "k", label: "a kind" }];
-  // Local midnight: tick labels are in the reader's own time, like every date on
-  // the ledger, so the fixture is built in local time too.
-  const from = new Date(2026, 8, 1, 0, 0, 0).getTime();
+describe("occurrences per interval", () => {
+  // Local midnight: buckets are in the reader's own time, like every date on the
+  // ledger, so the fixtures are built in local time too.
+  const midnight = new Date(2026, 8, 1, 0, 0, 0).getTime();
+  const H = 3_600_000;
 
-  it("puts a labelled tick on the interval and thins labels to at most eight", () => {
-    const { container } = render(
-      <Scatter rows={rows} fromMs={from} toMs={from + 24 * 3_600_000} intervalMs={3_600_000}
-               points={[{ rowKey: "k", atMs: from + 3_600_000, title: "t" }]} />);
-    const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent);
-    expect(labels.length).toBeLessThanOrEqual(9);
-    // 25 ticks thinned to one in four: seven labels, four hours apart.
-    expect(labels[0]).toBe("00:00");
-    expect(labels[1]).toBe("04:00");
+  it("counts events into whole-clock buckets and keeps the zeros", () => {
+    const b = bucketize([midnight + 30 * 60_000, midnight + 45 * 60_000, midnight + 5 * H], midnight, midnight + 6 * H, H);
+    expect(b.map((x) => x.count)).toEqual([2, 0, 0, 0, 0, 1]);
+    expect(b[0]!.startMs).toBe(midnight);
+    expect(b[5]!.endMs).toBe(midnight + 6 * H);
   });
 
-  it("uses dates for day-sized steps", () => {
-    const { container } = render(
-      <Scatter rows={rows} fromMs={from} toMs={from + 7 * 24 * 3_600_000} intervalMs={24 * 3_600_000}
-               points={[{ rowKey: "k", atMs: from, title: "t" }]} />);
-    const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent);
-    expect(labels[0]).toBe("Sep 01");
-    expect(labels).toHaveLength(8);
+  it("snaps to the clock when the window opens mid-hour, keeping the partial edge buckets", () => {
+    // A window from 17:22 to 23:22 at one hour: buckets 17:00–18:00 (partial) up
+    // to 23:00–00:00 (partial). Seven buckets, not six, and none padded.
+    const from = new Date(2026, 8, 1, 17, 22).getTime();
+    const b = bucketize([from + 60_000], from, from + 6 * H, H);
+    expect(b).toHaveLength(7);
+    expect(b[0]!.startMs).toBe(new Date(2026, 8, 1, 17, 0).getTime());
+    expect(b[0]!.count).toBe(1);
+    expect(b[6]!.endMs).toBe(new Date(2026, 8, 2, 0, 0).getTime());
   });
 
-  it("snaps ticks to the clock, so a window opened mid-afternoon still labels whole days", () => {
-    // Seven days at an 8-hour step from 17:22: thinned to one label a day, every
-    // label read "17:22". Snapped to midnight, the labels name days and hours.
+  it("draws one bar per bucket with the count in its hover text, and whole-number gridlines", () => {
+    const b = bucketize([midnight + 60_000, midnight + 120_000, midnight + 2 * H], midnight, midnight + 4 * H, H);
+    const { container } = render(<TimeBars buckets={b} fromMs={midnight} toMs={midnight + 4 * H} unit={{ one: "failure", many: "failures" }} />);
+    const bars = [...container.querySelectorAll("[data-bar]")];
+    expect(bars).toHaveLength(4);
+    expect(bars[0]!.querySelector("title")?.textContent).toBe("Sep 01 00:00 → Sep 01 01:00: 2 failures");
+    expect(bars[1]!.getAttribute("height")).toBe("0");
+    // Gridlines are whole occurrences: 1 and 2, never 0.5.
+    const grid = [...container.querySelectorAll("text.mono")].map((t) => t.textContent).filter((t) => /^\d+$/.test(t ?? ""));
+    expect(grid).toEqual(["1", "2"]);
+  });
+
+  it("labels whole days when the labelled ticks are a day apart", () => {
     const start = new Date(2026, 7, 29, 17, 22).getTime();
-    const { container } = render(
-      <Scatter rows={rows} fromMs={start} toMs={start + 7 * 24 * 3_600_000} intervalMs={8 * 3_600_000}
-               points={[{ rowKey: "k", atMs: start + 3_600_000, title: "t" }]} />);
-    const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent);
-    expect(labels.length).toBeLessThanOrEqual(8);
+    const b = bucketize([start + H], start, start + 7 * 24 * H, 8 * H);
+    const { container } = render(<TimeBars buckets={b} fromMs={start} toMs={start + 7 * 24 * H} unit={{ one: "x", many: "x" }} />);
+    const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent).filter((t) => /[A-Z]/.test(t ?? ""));
+    expect(labels.length).toBeLessThanOrEqual(7);
     expect(labels[0]).toBe("Aug 30 00:00");
     expect(new Set(labels).size).toBe(labels.length);
-  });
-
-  it("fans out dots that land on the same pixel instead of hiding one behind another", () => {
-    const { container } = render(
-      <Scatter rows={rows} fromMs={from} toMs={from + 3_600_000} intervalMs={300_000}
-               points={[
-                 { rowKey: "k", atMs: from + 1000, title: "one" },
-                 { rowKey: "k", atMs: from + 1000, title: "two" },
-               ]} />);
-    const dots = [...container.querySelectorAll("[data-dot]")];
-    expect(dots).toHaveLength(2);
-    expect(dots[0]!.getAttribute("cy")).not.toBe(dots[1]!.getAttribute("cy"));
-    expect(dots.map((d) => d.querySelector("title")?.textContent)).toEqual(["one", "two"]);
   });
 });
