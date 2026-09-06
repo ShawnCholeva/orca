@@ -32,6 +32,13 @@ const getTemplateMetricsDetailMock = vi.fn();
 // Nothing waiting unless a test says otherwise; App calls this on mount.
 const getRunSummariesMock = vi.fn().mockResolvedValue([]);
 
+const notifyParkedMock = vi.fn(async () => undefined);
+let appOutOfSightMock = true;
+vi.mock("./chrome/park-notification", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./chrome/park-notification")>();
+  return { ...mod, notifyParked: (...args: unknown[]) => notifyParkedMock(...args), appOutOfSight: () => appOutOfSightMock };
+});
+
 vi.mock("./api", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./api")>();
   return {
@@ -447,5 +454,41 @@ describe("Goals rail waiting badge", () => {
     const quiet = within(rail).getByText("Quiet Goal").closest("li")!;
     expect(within(quiet).getByText("active")).toBeInTheDocument();
     expect(within(quiet).queryByText("waiting")).toBeNull();
+  });
+
+  it("notifies once when a run newly parks while the app is out of sight — never on the first poll", async () => {
+    // First poll: nothing waiting. Second poll (a wake): the run has parked.
+    const waitingRun = (await getRunSummariesMock.getMockImplementation()!()) as unknown;
+    getRunSummariesMock.mockReset();
+    getRunSummariesMock.mockResolvedValueOnce([]).mockResolvedValue(waitingRun);
+    notifyParkedMock.mockClear();
+    appOutOfSightMock = true;
+    render(
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>,
+    );
+    const rail = await screen.findByRole("complementary", { name: "Goals" });
+    await within(rail).findByText("Waiting Goal");
+    expect(notifyParkedMock).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await within(rail).findByText("waiting");
+    await waitFor(() => expect(notifyParkedMock).toHaveBeenCalledTimes(1));
+    expect(notifyParkedMock).toHaveBeenCalledWith("Waiting Goal", "Waiting on you for 39h 0m · a step waiting for your OK");
+  });
+
+  it("does not notify about a goal that was already waiting when the app opened", async () => {
+    notifyParkedMock.mockClear();
+    appOutOfSightMock = true;
+    render(
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>,
+    );
+    const rail = await screen.findByRole("complementary", { name: "Goals" });
+    await within(rail).findByText("waiting");
+    expect(notifyParkedMock).not.toHaveBeenCalled();
   });
 });

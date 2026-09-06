@@ -17,6 +17,7 @@
     "@orca/contracts": "workspace:*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-notification": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "d3-scale": "^4.0.2",
     "d3-shape": "^3.2.0",

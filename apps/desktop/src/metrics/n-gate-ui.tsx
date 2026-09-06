@@ -175,7 +175,9 @@ export function RateInterval({
 function formFor(state: MeasurementState, lossy: boolean): { borderLeftStyle: string; borderLeftColor: string } {
   switch (state) {
     case "insufficient":
-      return { borderLeftStyle: "dashed", borderLeftColor: "var(--accent)" };
+      // Dashed says "not yet"; the colour stays structural. `--accent` is the
+      // link colour, and a border in it read as something to click.
+      return { borderLeftStyle: "dashed", borderLeftColor: "var(--hairline-strong)" };
     case "unmeasurable_coverage":
       // Not amber. Across the app amber means exactly one thing — act on this now —
       // and on the Runs list it is spent on a single instance, `1 prompt waiting on

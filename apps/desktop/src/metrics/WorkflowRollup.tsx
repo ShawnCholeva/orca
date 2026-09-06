@@ -496,7 +496,10 @@ function VersionTable({ rows }: { rows: VersionRow[] }) {
           cell(usd(r.usd), 8),
           cell(dur(r.elapsedMs), 9),
           // The share is a ratio of a closed set — this version's own ended runs.
-          cell(r.elapsedMs > 0 ? `${Math.round((r.parkedMs / r.elapsedMs) * 100)}%` : "—", 10),
+          // A bare dash is the untyped absence this screen exists to remove: say
+          // what is missing. Zero elapsed means none of this version's ended runs
+          // recorded a start and finish, so there is no time to take a share of.
+          cell(r.elapsedMs > 0 ? `${Math.round((r.parkedMs / r.elapsedMs) * 100)}%` : "not timed", 10),
         ])}
       </div>
       {rows.some((r) => r.running > 0) && (

@@ -10,24 +10,7 @@ holds it. **Status: `open` unless stated.**
 
 | # | Issue | Status | Notes |
 |---|---|---|---|
-| A2 | ~~**Nothing notifies the user when a run parks on them.**~~ **SPLIT — the premise was wrong.** The frontend engineer asked the founder whether the app was open during the 18h and 39h parks. Answer: *"The laptop was closed and sleeping."* A sleeping laptop suspends the daemon, so **no local channel can fire** — a desktop notification would have gone off once into an empty room and then the machine slept. Nobody on the team checked this; the lead set A2 as the gate for all other work and justified it with a personal 38.6h reproduction, without asking whether the machine was awake. Splits into: **(1) unmissable on wake** — BUILDING, the only local mechanism that addresses the actual incidents; **(2) OS notification at park time** — HELD, covers a different case (at the machine, Orca behind another window) with no evidence it has ever cost anything; **(3) off-device delivery** — **DECLINED by the founder**, not wanted yet. | (1) **LANDED** `4ebafdb` — the goal's status chip reads WAITING with the wait and what the run wants; (2) HELD; (3) declined |
 | A6 | **924s watchdog lag.** `sessions.exited_at` is the watchdog's stamp, not the death; one row lagged 15.4 min. | OPEN — no death signal exists to record | Consequence: any duration derived from `exited_at` measures *detection*, not death. Checked 2026-09-06: a worker's tmux session runs the agent directly (`sh -c <claude …>`), so it dies with the process, and the watchdog ticks every 5s after a 15s grace — while the daemon is awake, detection trails death by seconds. The 924s row is the daemon-down case (sleep or restart): the previous generation's last sight of the worker is not stored, so no stamp can be honest there. The remedy is at the consumer — treat `exited_at` on `worker_exited_no_signal` / `daemon_restart` rows as detection and clip to the last signal — which is the metrics layer's H-family work, not a daemon write. |
-| A13 | **The ledger has no staleness bound on a live run.** An abandoned run renders identically to one that started 30 seconds ago, and its `elapsedMs` grows forever because `accruing: true` has no upper bound. Note this is the *mirror* of the settled elapsed rule: product correctly decided elapsed must NOT tick for a **terminated** run (a 17-minute run must not claim "50h and counting"); the unexamined case is a run that is technically `active` and practically abandoned. Consequence for aggregates: one forgotten run's parked time grows without limit and will eventually dominate any window that includes it. | OPEN — framing is product's call |
-
-## B. Metrics screen — data and doctrine
-
-| # | Issue | Status |
-|---|---|---|
-| B2 | Score, tier and band computed over **three different populations** (n=4.5, n=1, n=1), rendered adjacently with no indication. | OPEN — rule recorded |
-
-## C. Metrics screen — UI defects found by driving it
-
-| # | Issue | Status |
-|---|---|---|
-| C3 | **"Analyze this template" spends money silently** — 60.8s, no cost warning, no elapsed counter, no cancel. Spawns an LLM call per qualifying step. | OPEN |
-| C11 | **The aggregate view still renders a bare em dash for null metrics.** Its own test — `"renders em dash for null metrics (not 0 / F)"` — passes and honestly describes today's screen, but an em dash is exactly the untyped absence this project exists to remove. Flagged rather than silently ported during the default flip; converting the aggregate view to typed nulls is its own piece of work. | OPEN |
-| C10 | Copy dates were UTC; screen renders local. Screen is right — copy needs updating. | OPEN (copy) |
-| C14 | **`--accent` carries five meanings at once, three of them visible in a single run row.** It is simultaneously: the link/button colour (`MetricsPage` `linkBtn`, `← All runs`), the selected-tab state (`MetricsPage.tsx:194`), the `running` termination tone (`RunLedger.tsx:39`), the **"waiting on you"** duration segment (`interval-bar.tsx:138`), and the `insufficient`-sample border (`n-gate-ui.tsx:165`). So the widest band on most rows — the intervention tax, the screen's headline finding — is painted in the app's "this is interactive" colour. Compounding it, the segments render as a left-anchored green→blue fill, which is the progress-bar idiom; on a mixed row it is literally a green bar at 26%. Encoding fix proposed: hue = whose time (Orca/you), material = measured or not, unmeasured becomes the **track** rather than a third segment. | OPEN — UI, mine |
 
 ## C+. Executable axis — the harness over-crediting itself
 
@@ -120,17 +103,7 @@ holds it. **Status: `open` unless stated.**
 - **An assertion that fires on healthy data is worse than none** — it burns the reader's belief that it means something.
 - **Non-random termination contaminates a population** exactly as non-random missingness invalidates a bound. 4 of 5 runs died from infrastructure ⇒ effective n for workflow quality is **1, not 5**.
 
-## H. The observability ceiling, measured
-
-| # | Finding | Status |
-|---|---|---|
-| H2 | **`silent` is unmeasurable mid-step and must say so.** A run classifier reading "no transitions for 47 minutes" as *idle* would have reported the instrument, not the run — on a step that produced working code and passing tests. Three blocking requirements before that row ships: name the channel (*"no step boundary in 47 minutes"*, not *"idle"*); treat silence the channel cannot distinguish from unrecorded activity as `unknown`, not a verdict; clip both clocks to the run's terminal so terminated runs don't drift toward looking maximally silent. | OPEN — blocking the idle-run row |
-
-## I. Rendered-screen findings (only visible once screenshots worked)
-
-| # | Issue | Status |
-|---|---|---|
-| I8 | Five tag vocabularies across two screens; `unchecked` on five of six rows duplicating the section note; a *value* annotation (`$2.31 replaced`) sharing a visual slot with two *measurement states*. | OPEN |
+## I. Rendered-screen findings — all closed; the rule they left behind
 
 **The rule that made all of these findable:** the count rule applies to **prose**, not only to fields — and **it is worse in copy than in a field, because a reader cannot inspect a sentence's denominator. They can click a field; they can only re-read a sentence.**
 

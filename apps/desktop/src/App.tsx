@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, FormEvent } from "react";
+import { useState, useEffect, useCallback, FormEvent, useRef } from "react";
 import { Goal, DomainEventType, type Agent, type GoalListItem, type RunSummary } from "@orca/contracts";
 import {
   fetchHealth,
@@ -19,6 +19,7 @@ import { Titlebar } from "./chrome/Titlebar";
 import { BootstrapErrorScreen } from "./chrome/BootstrapErrorScreen";
 import { NoReadyAgentsBanner } from "./chrome/NoReadyAgentsBanner";
 import { waitingByGoal, waitingLabel } from "./chrome/waiting-on-you";
+import { appOutOfSight, newlyWaiting, notifyParked } from "./chrome/park-notification";
 import { OrcaChat } from "./orchestrator/OrcaChat";
 import { WorkflowsPage } from "./workflows/WorkflowsPage";
 import { inputStyle } from "./workflows/ScopeControls";
@@ -229,6 +230,25 @@ export default function App() {
     };
   }, [refreshRuns]);
 
+  const waiting = waitingByGoal(runs);
+
+  // A2 part 2: one OS notification the moment a run first parks while the app is
+  // out of sight. The first poll is a baseline, not news — a goal that was already
+  // waiting when the app opened is the chip's job, and notifying about it would
+  // fire once into a room the reader is in.
+  const seenWaiting = useRef<Map<string, RunSummary["awaitingYou"]> | null>(null);
+  useEffect(() => {
+    const prev = seenWaiting.current;
+    seenWaiting.current = waiting;
+    if (prev === null || !appOutOfSight()) return;
+    for (const goalId of newlyWaiting(prev, waiting)) {
+      const goal = goals.find((g) => g.id === goalId);
+      const w = waiting.get(goalId);
+      if (!goal || !w) continue;
+      void notifyParked(goal.title, waitingLabel(w));
+    }
+  }, [waiting, goals]);
+
   function handleCreateFlowDone(goalId: string) {
     setShowCreateFlow(false);
     setCreateFlowWorkspacePath(undefined);
@@ -293,7 +313,6 @@ export default function App() {
   }
 
   const selectedGoal = goals.find((g) => g.id === selectedOrchestratorGoalId) ?? null;
-  const waiting = waitingByGoal(runs);
 
   return (
     <div className="app-shell">

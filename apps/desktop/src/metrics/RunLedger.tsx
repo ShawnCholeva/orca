@@ -117,8 +117,10 @@ function withoutEngineCode(evidence: string): string {
   return evidence.replace(/\s*\([a-z0-9_]+\)\s*$/i, "");
 };
 
+// `--accent` is the link/button colour and nothing else on this screen borrows it:
+// a running run is a state, not a control, so it reads in plain text.
 const TERMINATION_TONE: Record<RunSummary["terminationCause"], string> = {
-  running: "var(--accent)",
+  running: "var(--text)",
   completed: "var(--run)",
   workflow_failed: "var(--warn)",
   infrastructure_killed: "var(--text-3)",

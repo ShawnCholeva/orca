@@ -133,6 +133,10 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
 
   const wf = summaries.find((s) => s.templateId === wfId) ?? summaries[0];
   const health = workflowHealthFromSteps(detail?.steps ?? []);
+  // The two rate tiles beside it carry "k of n"; a score next to them with no
+  // population reads as if it shared theirs. It does not — it is weighted over
+  // the steps that have a score — so it says so.
+  const scoredSteps = (detail?.steps ?? []).filter((s) => s.score != null).length;
   const healthColor = health == null ? "var(--text-3)" : health >= 80 ? "var(--run)" : health >= 60 ? "var(--warn)" : "var(--err)";
 
   return (
@@ -180,7 +184,7 @@ export function MetricsPage({ onOpenGoal }: { onOpenGoal?: (goalId: string) => v
           <MeasurementLabel state="insufficient" have={wf.runs} need={5} unit="runs" style={{ flexShrink: 0 }} />
         )}
         <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-          <StatTile label="Step health" value={health} accent={healthColor} grade={health == null ? null : gradeFor(health)} delta={pctDelta(wf.deltas.verificationStrength)} deltaGood="up" />
+          <StatTile label="Step health" value={health} unit={health == null ? undefined : `over ${scoredSteps} step${scoredSteps === 1 ? "" : "s"}`} accent={healthColor} grade={health == null ? null : gradeFor(health)} delta={pctDelta(wf.deltas.verificationStrength)} deltaGood="up" />
           <StatTile label="Gate health" value={wf.gateHealth.value} accent={wf.gateHealth.value == null ? "var(--text-3)" : wf.gateHealth.value >= 80 ? "var(--run)" : wf.gateHealth.value >= 60 ? "var(--warn)" : "var(--err)"} grade={wf.gateHealth.grade} delta={pctDelta(wf.gateHealth.delta)} deltaGood="up" />
           <StatTile label="First-pass" value={rate(wf.firstPass)} unit={denom(wf.firstPass)} />
           <StatTile label="Self-recovered" value={rate(wf.recovered)} unit={denom(wf.recovered)} accent="var(--warn)" />

@@ -41,6 +41,16 @@ type Props = {
 export function SelfImprovementRail({ detail, workflowName, templateId, period, onMutated, proposals, onReview, refetchProposals }: Props) {
   const [events, setEvents] = useState<LearningEvent[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
+  // Seconds since the review started. It spends a model call per analyzable
+  // step and used to run for a minute with no sign of life or cost.
+  const [analyzeStartedAt, setAnalyzeStartedAt] = useState<number | null>(null);
+  const [analyzeElapsedS, setAnalyzeElapsedS] = useState(0);
+  useEffect(() => {
+    if (analyzeStartedAt === null) return;
+    setAnalyzeElapsedS(0);
+    const t = setInterval(() => setAnalyzeElapsedS(Math.floor((Date.now() - analyzeStartedAt) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [analyzeStartedAt]);
   const [judging, setJudging] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -67,13 +77,14 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   const onAnalyze = async () => {
     if (!templateId) return;
     setAnalyzing(true);
+    setAnalyzeStartedAt(Date.now());
     try {
       await analyzeTemplate(templateId, period);
       await refetchProposals();
       // The run just wrote created/analyzed events — refetch or the log stays stale.
       const evs = await listLearningEvents(templateId).catch(() => null);
       if (evs && mountedRef.current) setEvents(evs);
-    } finally { setAnalyzing(false); }
+    } finally { setAnalyzing(false); setAnalyzeStartedAt(null); }
   };
   const onApply = async (p: TemplateInstructionProposal) => {
     // Card-level Apply applies unedited — editing now lives in ProposalReviewModal (opened via
@@ -138,10 +149,18 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
           : <>Every step in {workflowName} is healthy.</>}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
         <Btn kind="primary" size="sm" onClick={onAnalyze} disabled={analyzing || !templateId}>
-          {analyzing ? "Reviewing runs…" : "Analyze this template"}
+          {analyzing ? `Reviewing runs… ${analyzeElapsedS}s` : "Analyze this template"}
         </Btn>
+        {/* Say what the button spends before it is pressed. It cannot be cancelled
+            once running — the daemon has no abort for an in-flight review — so
+            the honest control is the price tag, not a stop button. */}
+        <div style={{ fontSize: 11, color: "var(--text-3)", textAlign: "center" }} data-testid="analyze-cost-hint">
+          {analyzable === 0
+            ? "Nothing to review yet — no flagged step has enough runs."
+            : `Makes ${analyzable} model call${analyzable === 1 ? "" : "s"}, one per flagged step with enough runs. Usually under a minute; it can't be stopped once started.`}
+        </div>
       </div>
 
       {error && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
