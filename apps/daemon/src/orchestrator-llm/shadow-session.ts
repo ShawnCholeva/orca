@@ -14,6 +14,7 @@ import {
   sendKey,
   hasSession,
   killSession,
+  TMUX_OWNER_VAR,
 } from "../tmux/runner.js";
 import { trustPromptMoves } from "../tmux/trust-prompt.js";
 
@@ -121,7 +122,7 @@ export class ShadowSessionManager {
     const { bin, args = [] } = provider.launch({ binOverride: this.binOverride(adapterId) });
     // tmux runs this via `sh -c`, so quote any token containing whitespace (e.g. a bin path with spaces).
     const command = [bin, ...args].map((token) => (/\s/.test(token) ? JSON.stringify(token) : token)).join(" ");
-    const started = await newSession(this.tmux, name, dir, command);
+    const started = await newSession(this.tmux, name, dir, command, { [TMUX_OWNER_VAR]: dirname(this.deps.shadowRoot) });
     dbg(goalId, `tmux new-session code=${started.code} adapter=${adapterId} name=${name} command=${command} dir=${dir}`);
     const ready = this.startup(goalId, name, provider);
     const session: Session = { adapterId, provider, name, ready, queue: Promise.resolve(), pending: null, systemSent: false };

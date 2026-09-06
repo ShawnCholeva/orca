@@ -3,6 +3,7 @@ import { join, dirname } from "node:path";
 import {
   defaultTmuxRunner, newSession, capturePane, sendEnter, sendKey, paste, pipePaneToFile, killSession, hasSession,
   type TmuxRunner,
+  TMUX_OWNER_VAR,
 } from "../../tmux/runner.js";
 import { trustPromptMoves } from "../../tmux/trust-prompt.js";
 
@@ -98,6 +99,8 @@ export interface WorkerSessionDeps {
     }) => Promise<void>;
   };
   tmux?: TmuxRunner;
+  /** The data dir that owns the sessions this manager creates (see TMUX_OWNER_VAR). Defaults to privateRoot's parent. */
+  owner?: string;
   captureSink: (sessionId: string, chunk: Buffer) => void; // appends pane bytes to the output store
   markRunning?: (sessionId: string) => void; // optional: flip DB session status to running
   // Optional: flip the DB session row terminal when the manager reaps the
@@ -130,6 +133,7 @@ export class WorkerSessionManager {
   }
 
   private name(sessionId: string): string { return `orca-worker-${sessionId}`; }
+  private owner(): string { return this.deps.owner ?? dirname(this.deps.privateRoot); }
 
   async spawn(input: WorkerSpawnInput): Promise<void> {
     if (this.sessions.has(input.sessionId)) return;
@@ -164,7 +168,7 @@ export class WorkerSessionManager {
     const command = [input.command, ...hookCfg.spawnArgs]
       .map((token) => (/\s/.test(token) ? JSON.stringify(token) : token))
       .join(" ");
-    const env = { ...input.env, ...(hookCfg.env ?? {}) };
+    const env = { ...input.env, ...(hookCfg.env ?? {}), [TMUX_OWNER_VAR]: this.owner() };
     await newSession(this.tmux, name, input.workspacePath, command, env);
     // Output capture: pipe pane to a private file; daemon tails it (Task 3.2).
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));

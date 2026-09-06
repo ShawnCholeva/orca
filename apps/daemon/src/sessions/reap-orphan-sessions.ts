@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { killSession, listSessions, type TmuxRunner } from "../tmux/runner.js";
+import { killSession, listSessions, sessionOwner, type TmuxRunner } from "../tmux/runner.js";
 import { liveSessionSql } from "./live-session.js";
 import { tmuxSessionName } from "../orchestrator-llm/shadow-session.js";
 
@@ -52,7 +52,13 @@ export function workerSessionIdsForRun(db: Database.Database, runId: string): st
 // get a live agent killed — the asymmetry this sweep should have had from the
 // start, given that being wrong in one direction only wastes a tmux session and
 // being wrong in the other destroys work.
-export async function reapOrphanTmuxSessions(r: TmuxRunner, db: Database.Database): Promise<string[]> {
+//
+// `owner` is this daemon's data dir. Only sessions tagged with it are eligible:
+// a session tagged for another data dir belongs to another daemon (a test
+// booting against a temp dir, a second install), and an untagged one predates
+// the tag. Both are left alone — a leaked pane costs a tmux session; a killed
+// live agent costs the work — and counted in the log so the leak is visible.
+export async function reapOrphanTmuxSessions(r: TmuxRunner, db: Database.Database, owner: string): Promise<string[]> {
   const ours = (await listSessions(r)).filter(
     (n) => n.startsWith(WORKER_PREFIX) || n.startsWith(SHADOW_PREFIX)
   );
@@ -81,11 +87,14 @@ export async function reapOrphanTmuxSessions(r: TmuxRunner, db: Database.Databas
   }
 
   const reaped: string[] = [];
+  let foreign = 0;
   for (const name of ours) {
     const keep = name.startsWith(WORKER_PREFIX) ? keepWorkers.has(name) : keepShadows.has(name);
     if (keep) continue;
+    if ((await sessionOwner(r, name)) !== owner) { foreign += 1; continue; }
     await killSession(r, name, "boot reap: not kept for any active run");
     reaped.push(name);
   }
+  if (foreign > 0) console.log(`[reap] left ${foreign} orca tmux session(s) owned by another daemon or untagged`);
   return reaped;
 }

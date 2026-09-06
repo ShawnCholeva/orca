@@ -1003,7 +1003,7 @@ export function createServer(
       // orca-worker/orca-shadow tmux sessions orphaned by a prior daemon
       // generation (tmux outlives the daemon; nothing else reaps them). Ordered
       // AFTER resume so a wanted worker is never killed out from under a reattach.
-      .then(() => reapOrphanTmuxSessions(defaultTmuxRunner(), db))
+      .then(() => reapOrphanTmuxSessions(defaultTmuxRunner(), db, config.dataDir))
       .then((reaped) => {
         if (reaped.length > 0) {
           console.log(`[reap] killed ${reaped.length} orphaned tmux session(s): ${reaped.join(", ")}`);

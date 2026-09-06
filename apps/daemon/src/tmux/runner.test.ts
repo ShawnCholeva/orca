@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { capturePane, killSession, listSessions, newSession, paste, sendEnter, sendKey, type TmuxRunner } from "./runner.js";
+import { capturePane, killSession, listSessions, newSession, paste, sendEnter, sendKey, sessionOwner, type TmuxRunner } from "./runner.js";
 
 function fakeRunner(stdout = ""): TmuxRunner & { calls: string[][] } {
   const calls: string[][] = [];
@@ -64,5 +64,14 @@ describe("tmux runner helpers", () => {
     await newSession(r, "orca-worker-3", "/tmp", "claude");
     expect(warn).toHaveBeenCalledWith("[tmux] new-session replaced a live session orca-worker-3");
     warn.mockRestore();
+  });
+
+  it("sessionOwner reads the tag from the session environment and is null when absent or gone", async () => {
+    const tagged: TmuxRunner = { run: vi.fn(async () => ({ stdout: "ORCA_OWNER=/Users/dev/.orca\n", stderr: "", code: 0 })) };
+    expect(await sessionOwner(tagged, "orca-worker-1")).toBe("/Users/dev/.orca");
+    const untagged: TmuxRunner = { run: vi.fn(async () => ({ stdout: "-ORCA_OWNER\n", stderr: "", code: 0 })) };
+    expect(await sessionOwner(untagged, "orca-worker-1")).toBeNull();
+    const gone: TmuxRunner = { run: vi.fn(async () => ({ stdout: "", stderr: "can't find session", code: 1 })) };
+    expect(await sessionOwner(gone, "orca-worker-1")).toBeNull();
   });
 });

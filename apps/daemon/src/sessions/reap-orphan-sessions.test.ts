@@ -75,13 +75,21 @@ function seedSession(
   ).run(id, goalId, `ws-${goalId}`, status, stepRunId, NOW);
 }
 
-function fakeTmux(sessionNames: string[]): TmuxRunner & { killed: string[] } {
+const OWNER = "/data/orca";
+
+// `owners` says which data dir each session was created for; a name absent
+// from it is untagged (predates the tag, or was created by hand).
+function fakeTmux(sessionNames: string[], owners: Record<string, string> = Object.fromEntries(sessionNames.map((n) => [n, OWNER]))): TmuxRunner & { killed: string[] } {
   const killed: string[] = [];
   return {
     killed,
     run: async (args: string[]) => {
       if (args[0] === "list-sessions") return { stdout: sessionNames.join("\n") + "\n", stderr: "", code: 0 };
       if (args[0] === "kill-session") { killed.push(args[2]); return { stdout: "", stderr: "", code: 0 }; }
+      if (args[0] === "show-environment") {
+        const o = owners[args[2]];
+        return o === undefined ? { stdout: "-ORCA_OWNER\n", stderr: "", code: 0 } : { stdout: `ORCA_OWNER=${o}\n`, stderr: "", code: 0 };
+      }
       return { stdout: "", stderr: "", code: 0 };
     },
   } as TmuxRunner & { killed: string[] };
@@ -118,7 +126,7 @@ describe("reapOrphanTmuxSessions", () => {
       "some-unrelated-session", // ignore — not an orca session
     ]);
 
-    const reaped = await reapOrphanTmuxSessions(tmux, db);
+    const reaped = await reapOrphanTmuxSessions(tmux, db, OWNER);
 
     expect([...reaped].sort()).toEqual([
       "orca-shadow-g-done",
@@ -132,10 +140,26 @@ describe("reapOrphanTmuxSessions", () => {
     expect(tmux.killed).not.toContain("orca-shadow-g-active");
   });
 
+  it("never kills a session owned by another daemon, or an untagged one", async () => {
+    // A test that boots startDaemon() against a temp data dir runs this reaper
+    // with an empty database: everything on the shared tmux server looks
+    // orphaned to it. It killed every live worker on the developer's machine,
+    // twice per suite run, and every one of those deaths was recorded as a
+    // crash against the agent.
+    const db = freshDb();
+    const tmux = fakeTmux(
+      ["orca-worker-real-1", "orca-shadow-goal-real", "orca-worker-old-untagged", "orca-worker-mine"],
+      { "orca-worker-real-1": "/Users/dev/.orca", "orca-shadow-goal-real": "/Users/dev/.orca", "orca-worker-mine": OWNER },
+    );
+    const reaped = await reapOrphanTmuxSessions(tmux, db, OWNER);
+    expect(reaped).toEqual(["orca-worker-mine"]);
+    expect(tmux.killed).toEqual(["orca-worker-mine"]);
+  });
+
   it("reaps nothing when there are no orca tmux sessions", async () => {
     const db = freshDb();
     const tmux = fakeTmux(["random-shell", "vim"]);
-    expect(await reapOrphanTmuxSessions(tmux, db)).toEqual([]);
+    expect(await reapOrphanTmuxSessions(tmux, db, OWNER)).toEqual([]);
     expect(tmux.killed).toEqual([]);
   });
 });
@@ -163,7 +187,7 @@ describe("reapOrphanTmuxSessions — freshly-spawned workers", () => {
       },
     };
 
-    expect(await reapOrphanTmuxSessions(tmux, db)).toEqual([]);
+    expect(await reapOrphanTmuxSessions(tmux, db, OWNER)).toEqual([]);
     expect(killed).toEqual([]);
   });
 
@@ -179,12 +203,13 @@ describe("reapOrphanTmuxSessions — freshly-spawned workers", () => {
     const tmux: TmuxRunner = {
       run: async (args) => {
         if (args[0] === "list-sessions") return { stdout: "orca-worker-sess-failed\n", stderr: "", code: 0 };
+        if (args[0] === "show-environment") return { stdout: `ORCA_OWNER=${OWNER}\n`, stderr: "", code: 0 };
         if (args[0] === "kill-session") killed.push(args[2]);
         return { stdout: "", stderr: "", code: 0 };
       },
     };
 
-    expect(await reapOrphanTmuxSessions(tmux, db)).toEqual(["orca-worker-sess-failed"]);
+    expect(await reapOrphanTmuxSessions(tmux, db, OWNER)).toEqual(["orca-worker-sess-failed"]);
     expect(killed).toEqual(["orca-worker-sess-failed"]);
   });
 });

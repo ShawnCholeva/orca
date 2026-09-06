@@ -18,6 +18,25 @@ export function defaultTmuxRunner(): TmuxRunner {
   };
 }
 
+/**
+ * Every session a daemon creates carries the data dir that owns it, in the
+ * tmux session environment. tmux is shared by every daemon on the machine —
+ * the real one, a second data dir, a test that boots `startDaemon()` against a
+ * temp dir — and the boot reaper kills what it does not recognise. Without an
+ * owner it recognised nothing that was not in its own database, so a test run
+ * killed every live worker on the developer's tmux server, twice per suite.
+ */
+export const TMUX_OWNER_VAR = "ORCA_OWNER";
+
+/** The owner tag a session was created with, or null when untagged / gone. */
+export async function sessionOwner(r: TmuxRunner, name: string): Promise<string | null> {
+  const res = await r.run(["show-environment", "-t", name, TMUX_OWNER_VAR]);
+  if (res.code !== 0) return null;
+  const line = res.stdout.trim();
+  if (!line.startsWith(`${TMUX_OWNER_VAR}=`)) return null;
+  return line.slice(TMUX_OWNER_VAR.length + 1);
+}
+
 export async function newSession(
   r: TmuxRunner,
   name: string,
