@@ -1,5 +1,6 @@
 import type { HarnessMetrics } from "../harness-metrics/usecases.js";
 import { computeHarnessMetricsFromTransitions } from "../harness-metrics/usecases.js";
+import { VERSION_DELTA_MIN_PER_SIDE } from "@orca/contracts";
 import type { MetricPeriod, MetricScope, TemplateMetricsSummary, StepMetrics, NodeVersionHistory, CountedRate } from "@orca/contracts";
 import type { TemplateTransition, TemplateStepRun } from "./fetch.js";
 import type { VindicationOutcome } from "./vindication.js";
@@ -250,7 +251,11 @@ export function computeTemplateSummary(input: {
   // Version comparison: latest vs immediately-prior version present in the window.
   const presentVersions = [...new Set(input.current.transitions.map((t) => t.templateVersion))].sort((a, b) => b - a);
   let versionComparison: TemplateMetricsSummary["versionComparison"] = null;
-  if (presentVersions.length >= 2) {
+  // Gated at emit, per side: a delta between one run and three is noise dressed
+  // as a trend, and a consumer given the number has no way to know. Absent is
+  // the honest shape below the floor.
+  const runsOf = (v: number) => input.versions.find((x) => x.version === v)?.runs ?? 0;
+  if (presentVersions.length >= 2 && presentVersions.slice(0, 2).every((v) => runsOf(v) >= VERSION_DELTA_MIN_PER_SIDE)) {
     const [latestV, priorV] = presentVersions;
     const latestDims = dimsFromTransitions(currentNonGate.filter((t) => t.templateVersion === latestV));
     const priorDims = dimsFromTransitions(currentNonGate.filter((t) => t.templateVersion === priorV));

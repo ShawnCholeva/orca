@@ -18,6 +18,7 @@ export interface AgentHookSettings {
     Stop: Array<{ hooks: CommandHook[] }>;
     StopFailure: Array<{ hooks: CommandHook[] }>;
     PreToolUse?: Array<{ matcher: string; hooks: CommandHook[] }>;
+    PostToolUse?: Array<{ matcher: string; hooks: CommandHook[] }>;
     PermissionRequest?: Array<{ matcher: string; hooks: CommandHook[] }>;
   };
 }
@@ -44,6 +45,13 @@ export function buildAgentHookSettings(args: {
         // never pay for the round-trip.
         { matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/tool-gate?sessionId=${sid}`, false), timeout: 10 }] },
         { matcher: "*", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/tool-use?sessionId=${sid}`, true), timeout: 5 }] },
+      ],
+      // Each tool's COMPLETION, not only its start. PreToolUse alone leaves the
+      // interior of a long step unrecorded: a 47-minute stretch of one run held no
+      // signal at all, so nothing could say whether the agent was working or hung.
+      // Spooled and non-blocking: this observes, it never decides.
+      PostToolUse: [
+        { matcher: "*", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/tool-result?sessionId=${sid}`, true), timeout: 5 }] },
       ],
       PermissionRequest: [
         { matcher: "*", hooks: [{ type: "command", command: cmd(`/v1/agent-hooks/permission?sessionId=${sid}`, false), timeout: 1800 }] },

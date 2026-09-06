@@ -6,7 +6,7 @@ import { EventBus } from "../../events.js";
 import { resetWorkflowEventPreparedStatements } from "../events.js";
 import { resetWorkflowStepProjectionPreparedStatements } from "../steps/projection.js";
 import { resetPreparedStatements as resetSessionStmts } from "../../sessions/projection.js";
-import { resetPreparedStatements as resetRuntimeStmts } from "../../sessions/runtime.js";
+import { isBookkeepingSessionEnd, resetPreparedStatements as resetRuntimeStmts } from "../../sessions/runtime.js";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import { OrchestratorService } from "./service.js";
 import { DispatchEngine } from "./dispatch-engine.js";
@@ -152,7 +152,9 @@ function makeServiceWithSubscriber(
   );
   const completions: Promise<void>[] = [];
   bus.subscribe((event) => {
-    if (event.type !== "session.failed") return;
+    if (event.type !== "session.failed" && event.type !== "session.exited") return;
+    // Same guard as server.ts: a bookkeeping exit is a record, not a turn boundary.
+    if (isBookkeepingSessionEnd(event.payload)) return;
     const sessionId = typeof event.payload.sessionId === "string" ? event.payload.sessionId : null;
     const goalId = typeof event.payload.goalId === "string" ? event.payload.goalId : null;
     if (!sessionId || !goalId) return;
@@ -300,6 +302,36 @@ describe("livenessWatchdogTick", () => {
     expect(sessionStatus(db, sessionId)).toBe("running");
     expect(crashRetries(db, stepRunId)).toBe(0);
     expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("closes a dead worker on a FINISHED step as exited — no failure, no crash retry, no respawn", async () => {
+    // The run is parked on a human with a finished step as its cursor; the worker's
+    // tmux is gone. Four such rows sat at `running` for days on one step, because
+    // the step-output guard below never let the tick look at them.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, stepRunId } = seedRunningWorkerStep(db, { withStepOutput: true });
+    db.prepare("UPDATE workflow_step_runs SET finished_at = ? WHERE id = ?").run(NOW, stepRunId);
+    const launch: WorkflowSessionLauncher["launch"] = vi.fn(async () => ({ sessionId: "respawn-1" }));
+    const { completions } = makeServiceWithSubscriber(db, bus, idFactory, launch);
+
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => false,
+      now: () => NOW,
+      graceMs: GRACE_MS,
+      stallMs: STALL_MS,
+      progress: new Map<string, ProgressMark>(),
+    });
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(sessionStatus(db, sessionId)).toBe("exited");
+    expect(crashRetries(db, stepRunId)).toBe(0);
+    expect(launch).not.toHaveBeenCalled();
+    // Nothing drove the step: no orchestrator turn was requested off the close.
+    expect(completions).toHaveLength(0);
+    // Idempotent: a closed row is no longer `running`, so the next tick sees nothing.
+    await livenessWatchdogTick(deps);
+    expect(sessionStatus(db, sessionId)).toBe("exited");
   });
 
   it("no-op when a step_output artifact already exists (even if tmux is dead)", async () => {

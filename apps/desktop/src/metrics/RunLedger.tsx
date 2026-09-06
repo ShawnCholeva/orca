@@ -456,7 +456,7 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
         <div style={{ display: "flex", gap: "var(--sp-3)", flexWrap: "wrap", fontSize: "var(--fs-2)", color: "var(--text-3)" }}>
           <span>{run.stepsDelivered} delivered</span>
           {run.stepsBlocked > 0 && <span>{run.stepsBlocked} blocked</span>}
-          {run.retriedCompletions > 0 && <span>{run.retriedCompletions} redone</span>}
+          {run.retriedAttempts > 0 && <span>{run.retriedAttempts} redone</span>}
           {run.spanRelaunches > 0 && <span>{run.spanRelaunches} relaunched after a crash</span>}
           {run.awaitingYou.count > 0 && (
             <span style={{ color: "var(--warn)", fontWeight: 600 }}>

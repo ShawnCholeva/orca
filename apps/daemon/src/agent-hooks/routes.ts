@@ -30,6 +30,16 @@ const AgentToolUsePayload = z
   })
   .passthrough();
 
+const AgentToolResultPayload = z
+  .object({
+    session_id: z.string().min(1).max(200).optional(),
+    transcript_path: z.string().max(1000).optional(),
+    hook_event_name: z.literal("PostToolUse").optional(),
+    tool_name: z.string().min(1).max(200),
+    tool_use_id: z.string().max(200).default(""),
+  })
+  .passthrough();
+
 export interface AgentHookRouteDeps {
   onResponseDone(payload: AgentResponseDonePayload): Promise<void>;
   // Resolve the adapter id for a session (DB lookup in prod); tags the response.
@@ -48,6 +58,8 @@ export interface AgentHookRouteDeps {
     sessionId: string,
     payload: { toolName: string; toolInput: unknown; toolUseId: string; transcriptPath: string | undefined },
   ): Promise<void>;
+  /** A tool call finished (PostToolUse). Observes only; the response never decides anything. */
+  onToolResult(sessionId: string, payload: { toolName: string; toolUseId: string }): Promise<void>;
   /**
    * Orca's policy gate. Returns a denial reason SHOWN TO THE AGENT, or null when the
    * policy has no opinion (the call then falls through to the normal permission
@@ -95,6 +107,32 @@ export function registerAgentHookRoutes(server: FastifyInstance, deps: AgentHook
         toolInput: body.data.tool_input,
         toolUseId: body.data.tool_use_id,
         transcriptPath: body.data.transcript_path,
+      });
+    }
+    return { continue: true };
+  });
+
+  server.post("/v1/agent-hooks/tool-result", async (request, reply) => {
+    const query = AgentToolUseQuery.safeParse(request.query);
+    const body = AgentToolResultPayload.safeParse(request.body);
+    if (!query.success || !body.success) {
+      reply.status(400);
+      return {
+        error: {
+          code: "validation_failed",
+          issues: [
+            ...(query.success ? [] : query.error.issues),
+            ...(body.success ? [] : body.error.issues),
+          ],
+        },
+      };
+    }
+    // Without a tool_use_id there is no step to close; the start signal already
+    // carried whatever this call was worth.
+    if (body.data.tool_use_id) {
+      await deps.onToolResult(query.data.sessionId, {
+        toolName: body.data.tool_name,
+        toolUseId: body.data.tool_use_id,
       });
     }
     return { continue: true };

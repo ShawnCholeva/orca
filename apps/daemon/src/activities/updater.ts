@@ -7,6 +7,7 @@ import {
 import type { ActivitySignal } from "./signals.js";
 import {
   appendActivityStep,
+  completeActivityStep,
   completeLive,
   expireLive,
   getLiveForStepRun,
@@ -65,6 +66,9 @@ export class ActivityUpdater {
         return;
       }
 
+      case "tool_result":
+        completeActivityStep(ctx, { stepRunId: signal.stepRunId, toolUseId: signal.toolUseId });
+        return;
       case "weak_signal_tick": {
         if (getLiveForStepRun(ctx.db, signal.stepRunId) === undefined) return;
         const now = this.nowMs();

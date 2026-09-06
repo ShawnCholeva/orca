@@ -2315,6 +2315,11 @@ export class OrchestratorService {
       .prepare("SELECT * FROM workflow_step_runs WHERE id = ?")
       .get(stepRunId) as StepRunRow | undefined;
     if (!stepRun || stepRun.status !== "active") return;
+    // A step whose work is finished (the run parked on a human decision with this
+    // step as its cursor) has nothing for a worker to do. Respawning it redid
+    // finished work once per daemon restart. Guarded here, not only at the boot
+    // caller, so no future caller can relaunch a finished step either.
+    if (stepRun.finished_at) return;
     const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
     if (!stepTpl) return;
     const goal = db

@@ -960,6 +960,41 @@ export function expireLiveOnStoppedRuns(ctx: ActivityStoreCtx): number {
   return expired;
 }
 
+/**
+ * Close the step recorded for `toolUseId` at the moment its tool actually
+ * finished (PostToolUse), and announce it. Until now a step closed only when the
+ * NEXT tool started, so a long-running last tool — or a hung one — looked
+ * identical to work in progress, and a step's interior left no record between
+ * tool starts. A tool whose start was coalesced by the updater's throttle has
+ * no step to close; that is the throttle's decision, so this is a silent no-op
+ * rather than an event for a call the record chose not to keep.
+ */
+export function completeActivityStep(
+  ctx: ActivityStoreCtx,
+  input: { stepRunId: string; toolUseId: string }
+): ActivityT | undefined {
+  let event: DomainEvent | undefined;
+  const activity = ctx.db.transaction(() => {
+    const step = ctx.db
+      .prepare(
+        `SELECT st.id AS id, st.activity_id AS activity_id
+         FROM activity_steps st JOIN activities a ON a.id = st.activity_id
+         WHERE st.tool_use_id = ? AND a.step_run_id = ? AND st.status = 'active'`
+      )
+      .get(input.toolUseId, input.stepRunId) as { id: string; activity_id: string } | undefined;
+    if (step === undefined) return undefined;
+    const now = currentTime(ctx);
+    ctx.db.prepare("UPDATE activity_steps SET status = 'done' WHERE id = ?").run(step.id);
+    ctx.db.prepare("UPDATE activities SET updated_at = ? WHERE id = ?").run(now, step.activity_id);
+    const updated = getActivityById(ctx.db, step.activity_id);
+    if (updated === undefined) throw new Error(`Activity disappeared: ${step.activity_id}`);
+    event = insertActivityChangedEvent(ctx.db, updated, now);
+    return updated;
+  })();
+  publishActivityChanged(ctx, event);
+  return activity;
+}
+
 // Point-in-time record of one orchestrator LLM turn (auditable trajectory).
 // A completed row (not the one-live-per-step bubble) so it never conflicts with
 // the live worker activity for the same step.

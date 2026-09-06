@@ -100,6 +100,11 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
   const applied = proposals.filter((p) => p.status === "applied");
   const steps = detail?.steps ?? [];
   const attention = steps.filter((s) => statusForStep(s) !== "healthy").length;
+  // The analyzer only reviews steps with enough runs (diagnose.ts SAMPLE_MIN) and
+  // ok confidence — a different population from `attention`. Saying "6 steps"
+  // above a review that reports 1 was two populations rendered as a contradiction;
+  // name the second one where the first is stated.
+  const analyzable = steps.filter((s) => statusForStep(s) !== "healthy" && s.confidence === "ok" && s.sampleSize >= 5).length;
   const stepName = (id: string | null) => (id ? steps.find((s) => s.stepTemplateId === id)?.name ?? id : "the template");
   const stepDotColor = (id: string) => {
     const s = steps.find((x) => x.stepTemplateId === id);
@@ -125,7 +130,11 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
         {attention > 0
           ? pending.length > 0
             ? <>Orca flagged <strong style={{ color: "var(--text)" }}>{attention} underperforming step{attention !== 1 ? "s" : ""}</strong> in {workflowName} and drafted {pending.length} change{pending.length !== 1 ? "s" : ""}. Review each to let it improve itself.</>
-            : <>Orca sees <strong style={{ color: "var(--text)" }}>{attention} step{attention !== 1 ? "s" : ""} underperforming</strong> in {workflowName}. Analyze to draft fixes.</>
+            : <>Orca sees <strong style={{ color: "var(--text)" }}>{attention} step{attention !== 1 ? "s" : ""} underperforming</strong> in {workflowName}. {analyzable === 0
+                ? "None has enough runs yet for a review to draft a fix."
+                : analyzable === attention
+                  ? "Analyze to draft fixes."
+                  : `${analyzable} of them ${analyzable === 1 ? "has" : "have"} enough runs to analyze.`}</>
           : <>Every step in {workflowName} is healthy.</>}
       </div>
 
@@ -143,7 +152,9 @@ export function SelfImprovementRail({ detail, workflowName, templateId, period, 
           <div style={{ fontSize: 12 }}>
             {lastReviewStalled
               ? `The last review flagged ${lastReviewStalled.stepsDiagnosed} step${lastReviewStalled.stepsDiagnosed === 1 ? "" : "s"} but couldn't draft a change — the Learning log below records why.`
-              : "Nothing to propose — steps are healthy or below the sample threshold."}
+              : attention > 0
+                ? "No changes drafted yet."
+                : "Nothing to propose — every step is healthy."}
           </div>
         </div>
       )}

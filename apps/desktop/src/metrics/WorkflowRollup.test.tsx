@@ -24,7 +24,7 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
                  spanActiveMs: 0, accruing: false, integrityFlag: null },
     cost: { usd: 10, wastedUsd: 0, failedUsd: 4, supersededUsd: 1,
             coverage: { reported: 2, total: 3, silent: 1 }, rollupCheck: "matches" },
-    stepsDelivered: 1, stepsBlocked: 2, spanRelaunches: 3, retriedCompletions: 1, openInterventions: 0,
+    stepsDelivered: 1, stepsBlocked: 2, spanRelaunches: 3, retriedAttempts: 1, openInterventions: 0,
     progress: { lastProgressAt: null, lastProgressChannel: null, lastSignalAt: null,
                 lastSignalChannel: null, silenceConclusive: true },
     awaitingYou: { count: 0, sinceMs: null, sourceKind: null },

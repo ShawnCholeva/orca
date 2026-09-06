@@ -362,6 +362,27 @@ describe("computeTemplateSummary", () => {
     expect(o.scope.inferred).toBe(true); // and the claim carries that it is weak
   });
 
+  it("withholds the version comparison when either side is below the per-side floor", () => {
+    // v16 with 1 run vs v14 with 3 runs rendered as a comparison. Neither side can
+    // support a delta; the contract carries null rather than a number to hedge.
+    const summary = computeTemplateSummary({
+      templateId: "t1", name: "Test Template", latestVersion: 2, runCount: 4,
+      versions: [
+        { version: 1, runs: 3, firstSeenAt: "2026-05-01T00:00:00.000Z" },
+        { version: 2, runs: 1, firstSeenAt: "2026-05-02T00:00:00.000Z" },
+      ],
+      current: {
+        transitions: [
+          stepComplete("a", "r1", "s1", 1, 100, "passed", "2026-05-02T00:00:00.000Z"),
+          stepComplete("b", "r2", "s1", 2, 120, "passed", "2026-05-03T00:00:00.000Z"),
+        ],
+        stepRuns: [stepRun("r1", "s1", 1, "passed", 1), stepRun("r2", "s1", 1, "passed", 2)],
+      },
+      prior: { transitions: [], stepRuns: [] },
+    });
+    expect(summary.versionComparison).toBeNull();
+  });
+
   it("single template version → versionComparison is null", () => {
     const summary = computeTemplateSummary({
       templateId: "t1", name: "Test Template", latestVersion: 1, runCount: 10,

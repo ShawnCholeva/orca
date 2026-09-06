@@ -29,6 +29,16 @@ export type ActivitySignal =
       toolUseId: string | null;
     }
   | {
+      // The tool call identified by toolUseId finished. Closes its step at the
+      // time it actually ended rather than when the next tool started.
+      kind: "tool_result";
+      goalId: string;
+      workflowRunId: string;
+      stepRunId: string;
+      agentSessionId: string | null;
+      toolUseId: string;
+    }
+  | {
       kind: "question_pending";
       stepRunId: string;
       text: string;

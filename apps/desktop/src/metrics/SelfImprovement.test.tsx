@@ -256,7 +256,7 @@ describe("SelfImprovementRail", () => {
     vi.spyOn(api, "listProposals").mockResolvedValue([]);
     vi.spyOn(api, "listLearningEvents").mockResolvedValue([analyzedClean] as never);
     render(<Harness />);
-    expect(await screen.findByText(/steps are healthy or below the sample threshold/i)).toBeTruthy();
+    expect(await screen.findByText(/Nothing to propose|No changes drafted yet/i)).toBeTruthy();
   });
 
   it("learning log renders events newest-first plus a synthesized row for an event-less proposal", async () => {

@@ -20,6 +20,7 @@ export interface StepRunRow {
   attempt: number;
   status: string;
   started_at: string | null;
+  finished_at: string | null;
   selected_operator_id: string | null;
   selected_model_id: string | null;
   revise_attempts: number;

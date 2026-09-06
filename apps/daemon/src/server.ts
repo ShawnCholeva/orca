@@ -152,7 +152,7 @@ import {
   stopSession,
 } from './sessions/usecases.js';
 import { createSessionOutputStore, type SessionOutputStore } from './sessions/output-store.js';
-import { SessionRuntime, WS_CLIENT_OPEN, type WsClient } from './sessions/runtime.js';
+import { SessionRuntime, WS_CLIENT_OPEN, type WsClient, isBookkeepingSessionEnd } from './sessions/runtime.js';
 import { ExtractionRunner } from './extractions/runner.js';
 import { DETERMINISTIC_EXTRACTOR_VERSION } from './extractions/deterministic-extractor.js';
 import { enqueueEligibleForGoal, tryEnqueueForTerminalSession } from './extractions/goal-open.js';
@@ -896,16 +896,18 @@ export function createServer(
         const rows = db.prepare(`
           SELECT wr.id AS run_id, wr.goal_id, wr.current_step_run_id,
                  (SELECT s.id FROM sessions s WHERE s.workflow_step_run_id = wr.current_step_run_id AND ${liveSessionSql('s.status')} ORDER BY s.created_at DESC LIMIT 1) AS session_id,
-                 (SELECT ws.pending_provider_recovery_json IS NOT NULL FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS provider_recovery_pending
+                 (SELECT ws.pending_provider_recovery_json IS NOT NULL FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS provider_recovery_pending,
+                 (SELECT ws.finished_at IS NOT NULL FROM workflow_step_runs ws WHERE ws.id = wr.current_step_run_id) AS step_finished
           FROM workflow_runs wr
           WHERE wr.status = 'active'
-        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null; provider_recovery_pending: number | null }>;
+        `).all() as Array<{ run_id: string; goal_id: string; current_step_run_id: string; session_id: string | null; provider_recovery_pending: number | null; step_finished: number | null }>;
         return rows.map((r) => ({
           runId: r.run_id,
           goalId: r.goal_id,
           currentStepRunId: r.current_step_run_id,
           sessionId: r.session_id,
           providerRecoveryPending: r.provider_recovery_pending === 1,
+          stepFinished: r.step_finished === 1,
         }));
       },
       isSessionAlive: async (id) => {
@@ -1051,6 +1053,9 @@ export function createServer(
       event.type !== "session.failed"
     )
       return;
+    // The watchdog closing a dead worker on a finished step is a record, not a
+    // turn boundary — see isBookkeepingSessionEnd.
+    if (isBookkeepingSessionEnd(event.payload)) return;
     const sessionId =
       typeof event.payload.sessionId === "string" ? event.payload.sessionId : null;
     const goalId =
@@ -1845,6 +1850,11 @@ export function createServer(
         // Dedupes at-least-once spool redeliveries (empty when the id is absent).
         toolUseId: payload.toolUseId || null,
       });
+    },
+    onToolResult: async (sessionId, payload) => {
+      const stepContext = resolveStepContext(sessionId);
+      if (!stepContext) return;
+      applyActivitySafely("agent.tool_result", { kind: "tool_result", ...stepContext, toolUseId: payload.toolUseId });
     },
     onToolGate: async (sessionId, payload) =>
       resolveToolPolicyDenial(

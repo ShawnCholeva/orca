@@ -123,6 +123,41 @@ export function failSession(
   persistFailure(db, bus, sessionId, goalId, failureReason, now);
 }
 
+/**
+ * A tmux worker found gone on a step whose work is already finished. Nothing is
+ * left to drive, so the row closes as `exited` rather than `failed`: a failure
+ * would spend the step's crash budget on work that succeeded. Without this the
+ * row read `running` forever — four such rows sat on one finished step, each
+ * counted as a live session by every reader.
+ */
+export const WORKER_GONE_AFTER_STEP_FINISHED = 'worker_gone_after_step_finished';
+
+/**
+ * A session end that is bookkeeping, not a turn boundary: the step it belonged
+ * to had already finished. Routing it into step synthesis re-drove a parked step
+ * once per closed row — four recommendation generations and a fresh park that
+ * reset a 73-hour wait to minutes. The event stays on the spine; nothing acts.
+ */
+export function isBookkeepingSessionEnd(payload: Record<string, unknown>): boolean {
+  return payload.reason === WORKER_GONE_AFTER_STEP_FINISHED;
+}
+
+export function exitGoneSession(
+  db: Database.Database,
+  bus: EventBus,
+  sessionId: string,
+  goalId: string,
+  now: string,
+): void {
+  const payload = { sessionId, goalId, exitCode: null, exitSignal: null, reason: WORKER_GONE_AFTER_STEP_FINISHED };
+  let event!: DomainEvent;
+  db.transaction(() => {
+    setSessionStatus(db, sessionId, 'exited', { exitedAt: now });
+    event = insertEvent(db, 'session.exited', goalId, payload, now);
+  })();
+  bus.publish(event);
+}
+
 export class SessionRuntime {
   private readonly handleSlots = new Map<string, HandleSlot>();
   private readonly subscriberMap = new Map<string, Set<WsClient>>();

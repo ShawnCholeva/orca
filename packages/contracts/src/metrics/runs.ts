@@ -392,13 +392,19 @@ export const RunSummary = z.object({
   stepsBlocked: z.number().int().nonnegative(),
   /**
    * Σ of span `restarts` — a step run RE-LAUNCHED, which is the crash/reap signal.
-   * NOT "how many times did this run retry"; that is `retriedCompletions`. The two
+   * NOT "how many times did this run retry"; that is `retriedAttempts`. The two
    * differ: a step can produce three completions from one launch (the revise loop)
    * or three launches for one completion (crash-retry).
    */
   spanRelaunches: z.number().int().nonnegative(),
   /** Σ of completions beyond the first per span — the revise/re-judge loop's volume. */
-  retriedCompletions: z.number().int().nonnegative(),
+  /**
+   * Attempts beyond the first, across the run's spans — the count "redone" copy
+   * must key off. NOT completions minus one: a veto-then-pass step emits two
+   * step_completes within ONE attempt, which rendered "redone 1x" beside
+   * "attempt 1 · passed" on the same row.
+   */
+  retriedAttempts: z.number().int().nonnegative(),
   openInterventions: z.number().int().nonnegative(),
   awaitingYou: AwaitingYou,
 }).strict();

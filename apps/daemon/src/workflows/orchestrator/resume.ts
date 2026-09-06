@@ -9,6 +9,15 @@ interface ResumeRunRow {
   currentStepRunId: string;
   sessionId: string | null;
   providerRecoveryPending: boolean;
+  /**
+   * The current step's work is already done (`finished_at` set): the run is
+   * parked on a human decision — mark-done, a judge retry, a recovery choice —
+   * with the step row still `active` as the run's cursor. There is nothing for a
+   * worker to do there, so a respawn would redo finished work; it did, once per
+   * restart, four times over on one run, spending the user's subscription each
+   * time and leaving four `running` session rows behind.
+   */
+  stepFinished: boolean;
 }
 
 export interface ResumeDeps {
@@ -56,6 +65,9 @@ export async function resumeActiveRuns(deps: ResumeDeps): Promise<void> {
 
       if (r.sessionId && (await deps.isSessionAlive(r.sessionId))) {
         await deps.reattach({ runId: r.runId, sessionId: r.sessionId });
+      } else if (r.stepFinished) {
+        // A finished step needs no worker; see ResumeRunRow.stepFinished.
+        console.log(`[resume] run ${r.runId}: step ${r.currentStepRunId} is finished, not respawning`);
       } else {
         await deps.respawn({ runId: r.runId, stepRunId: r.currentStepRunId, goalId: r.goalId });
       }

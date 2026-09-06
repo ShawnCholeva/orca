@@ -111,13 +111,18 @@ export function buildGateMetrics(input: {
 
     // --- Cost (never folded into health) ---
     const gateTs = input.transitions.filter((t) => t.stepTemplateId === `__gate__:${nodeId}`);
-    const tel = (t: TemplateTransition) => t.transition.telemetry as { latency_ms?: number | null; cost?: { usd?: number; tokens_in?: number; tokens_out?: number } | null } | undefined;
+    type Cost = { usd?: number; tokens_in?: number; tokens_out?: number; cache_read_tokens?: number | null; cache_creation_tokens?: number | null };
+    const tel = (t: TemplateTransition) => t.transition.telemetry as { latency_ms?: number | null; cost?: Cost | null } | undefined;
+    // Every token the gate moved. Cache reads dominate an agent turn; summing only
+    // in + out reported 11k for a step that moved 690k.
+    const allTokens = (c: Cost) =>
+      (c.tokens_in ?? 0) + (c.tokens_out ?? 0) + (c.cache_read_tokens ?? 0) + (c.cache_creation_tokens ?? 0);
     const usd = gateTs.map((t) => tel(t)?.cost?.usd).filter((x): x is number => typeof x === "number");
-    const tokens = gateTs.map((t) => { const c = tel(t)?.cost; return c ? (c.tokens_in ?? 0) + (c.tokens_out ?? 0) : null; }).filter((x): x is number => x != null);
+    const tokens = gateTs.map((t) => { const c = tel(t)?.cost; return c ? allTokens(c) : null; }).filter((x): x is number => x != null);
     const latencies = gateTs.map((t) => tel(t)?.latency_ms).filter((x): x is number => typeof x === "number");
     const overturnedRuns = new Set(overturned.map((d) => d.workflowRunId));
     const overturnedTokens = gateTs.filter((t) => t.transition.workflowRunId != null && overturnedRuns.has(t.transition.workflowRunId))
-      .map((t) => { const c = tel(t)?.cost; return c ? (c.tokens_in ?? 0) + (c.tokens_out ?? 0) : 0; });
+      .map((t) => { const c = tel(t)?.cost; return c ? allTokens(c) : 0; });
 
     // --- Failure-mode taxonomy ---
     const modes: GateFailureMode[] = [];

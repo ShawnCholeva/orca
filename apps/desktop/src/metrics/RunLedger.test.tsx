@@ -21,7 +21,7 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
       usd: 61.52, wastedUsd: 50.66, failedUsd: 48.02, supersededUsd: 2.64,
       coverage: { reported: 10, total: 11, silent: 0 }, rollupCheck: "matches",
     },
-    stepsDelivered: 8, stepsBlocked: 0, spanRelaunches: 1, retriedCompletions: 5,
+    stepsDelivered: 8, stepsBlocked: 0, spanRelaunches: 1, retriedAttempts: 5,
     openInterventions: 0,
     // The completed-run case: nothing waits because the run is over. The
     // INTERESTING case is the opposite — a live run holding an open card — so this

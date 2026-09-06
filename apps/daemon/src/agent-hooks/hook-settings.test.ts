@@ -27,6 +27,11 @@ describe("buildAgentHookSettings", () => {
     expect(cmd).not.toContain("--spool");
   });
 
+  it("observes every tool's completion with a spooled, non-blocking PostToolUse hook", () => {
+    const entry = settings.hooks.PostToolUse!.find((h) => h.matcher === "*")!;
+    expect(entry.hooks[0].command).toContain("/v1/agent-hooks/tool-result?sessionId=s1");
+  });
+
   it("gates bash and edit tools with a blocking PreToolUse hook", () => {
     // PermissionRequest alone cannot enforce a read-only step: it never fires for
     // calls a workspace allow-rule already approved. PreToolUse fires for every one.

@@ -11,6 +11,7 @@ const stepRun: StepRunRow = {
   ordinal: 0,
   attempt: 1,
   status: "active",
+  finished_at: null,
   started_at: "2026-06-09T00:00:00.000Z",
   selected_operator_id: null,
   selected_model_id: null,

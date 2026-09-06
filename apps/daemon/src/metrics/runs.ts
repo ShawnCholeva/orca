@@ -605,7 +605,7 @@ export function buildRunSummary(input: {
     stepsDelivered: stepRuns.filter((s) => DELIVERED.has(s.status)).length,
     stepsBlocked: stepRuns.filter((s) => BLOCKED.has(s.status)).length,
     spanRelaunches: spans.reduce((acc, s) => acc + s.restarts, 0),
-    retriedCompletions: spans.reduce((acc, s) => acc + Math.max(0, s.completions - 1), 0),
+    retriedAttempts: spans.filter((s) => s.attempt > 1).length,
     openInterventions: interventions.filter((iv) => iv.open).length,
     awaitingYou: computeAwaitingYou(interventions),
   };

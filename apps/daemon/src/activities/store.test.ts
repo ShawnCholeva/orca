@@ -5,6 +5,7 @@ import { EventBus } from "../events.js";
 import { defaultMigrationsDir, runMigrations } from "../migrations.js";
 import {
   appendActivityStep,
+  completeActivityStep,
   completeLive,
   expireLive,
   expireLiveForRun,
@@ -586,6 +587,28 @@ describe("ActivityStore", () => {
       // A run that can still act on its card keeps it: active, and paused (resumable, worker alive).
       expect(getLiveForStepRun(db, "s3")?.status).toBe("paused_for_input");
       expect(getLiveForStepRun(db, "s4")?.status).toBe("paused_for_input");
+    });
+  });
+
+  describe("completeActivityStep", () => {
+    it("closes the step for a finished tool call and announces it", () => {
+      const { ctx, events } = ctxFor(db);
+      appendActivityStep(ctx, { ...base, text: "Ran tests", category: "testing", diff: null, toolUseId: "t1" });
+      events.length = 0;
+
+      const updated = completeActivityStep(ctx, { stepRunId: "s1", toolUseId: "t1" });
+
+      expect(updated?.steps.map((s) => s.status)).toEqual(["done"]);
+      expect(events.filter((e) => e.type === "activity.changed")).toHaveLength(1);
+      // A second delivery of the same result (spool redelivery) is a no-op.
+      expect(completeActivityStep(ctx, { stepRunId: "s1", toolUseId: "t1" })).toBeUndefined();
+      expect(events.filter((e) => e.type === "activity.changed")).toHaveLength(1);
+    });
+
+    it("is silent for a tool call whose start was never recorded", () => {
+      const { ctx, events } = ctxFor(db);
+      expect(completeActivityStep(ctx, { stepRunId: "s1", toolUseId: "never-seen" })).toBeUndefined();
+      expect(events).toHaveLength(0);
     });
   });
 });

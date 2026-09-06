@@ -361,7 +361,7 @@ describe("buildRunDetail", () => {
     expect(detail.spans[0].restarts).toBe(1);   // two launches of one span: a relaunch
     expect(detail.spans[0].completions).toBe(1); // one completion: no revise loop
     expect(detail.run.spanRelaunches).toBe(1);
-    expect(detail.run.retriedCompletions).toBe(0);
+    expect(detail.run.retriedAttempts).toBe(0);
     expect(detail.spans[0].cost?.state).toBe("unknown");
     expect(detail.run.openInterventions).toBe(0);
   });

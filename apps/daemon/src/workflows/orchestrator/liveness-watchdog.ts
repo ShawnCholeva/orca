@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { isParkedOnActivity } from "../../activities/awaiting-user.js";
 
 import type { EventBus } from "../../events.js";
-import { failSession } from "../../sessions/runtime.js";
+import { exitGoneSession, failSession } from "../../sessions/runtime.js";
 
 /** One running worker session sitting on an active step-kind node. */
 export interface WatchdogStepRow {
@@ -17,6 +17,8 @@ export interface WatchdogStepRow {
   activityAtMs: number | null;
   /** True when Orca owes the next move (nothing is waiting on the user). */
   systemTurn: boolean;
+  /** The step's work is done (`finished_at` set); the run is parked on a human. */
+  stepFinished: boolean;
 }
 
 /** Last observed progress for a step run, carried across ticks. */
@@ -46,6 +48,8 @@ export interface LivenessWatchdogDeps {
   progress: Map<string, ProgressMark>;
   /** Emit the terminal failure signal for a live-but-idle worker. */
   reapStalled(row: WatchdogStepRow): void;
+  /** Close the row of a dead worker whose step is already finished (exited, not failed). */
+  closeGone(row: WatchdogStepRow): void;
 }
 
 /**
@@ -76,6 +80,16 @@ export async function livenessWatchdogTick(deps: LivenessWatchdogDeps): Promise<
       // Grace: never reap a session that has not been observable long enough
       // (or whose start time is unknown) — its tmux session may not exist yet.
       if (row.startedAtMs === null || now - row.startedAtMs < deps.graceMs) continue;
+      // A finished step has nothing left to drive, so a dead worker there is
+      // bookkeeping, not a crash: close the row as exited. Left alone, the row
+      // read `running` for as long as the run stayed parked — days.
+      if (row.stepFinished) {
+        if (!(await deps.isTmuxAlive(row.sessionId))) {
+          deps.progress.delete(row.stepRunId);
+          deps.closeGone(row);
+        }
+        continue;
+      }
       // The worker already produced output; its Stop-hook / synthesis path owns
       // advancement. Reaping here would double-drive the step run.
       if (deps.hasStepOutput(row.stepRunId)) continue;
@@ -150,6 +164,7 @@ export function buildLivenessWatchdogDeps(
           // index idx_activities_one_live_per_step guarantees at most one row.
           `SELECT s.id AS session_id, wsr.goal_id AS goal_id, wsr.id AS step_run_id,
                   s.started_at AS started_at, s.output_seq AS output_seq,
+                  wsr.finished_at AS step_finished_at,
                   a.status AS activity_status, a.source_kind AS activity_source_kind,
                   a.updated_at AS activity_updated_at
            FROM sessions s
@@ -171,6 +186,7 @@ export function buildLivenessWatchdogDeps(
           step_run_id: string;
           started_at: string | null;
           output_seq: number;
+          step_finished_at: string | null;
           activity_status: string | null;
           activity_source_kind: string | null;
           activity_updated_at: string | null;
@@ -188,6 +204,7 @@ export function buildLivenessWatchdogDeps(
         // is stuck, and a chat reply awaiting the user is a different question
         // this sensor has never claimed to answer.
         systemTurn: !isParkedOnActivity(r.activity_status, r.activity_source_kind),
+        stepFinished: r.step_finished_at !== null,
       }));
     },
     hasStepOutput: (stepRunId) =>
@@ -200,5 +217,6 @@ export function buildLivenessWatchdogDeps(
       failSession(db, bus, row.sessionId, row.goalId, "worker_exited_no_signal", opts.now()),
     reapStalled: (row) =>
       failSession(db, bus, row.sessionId, row.goalId, "worker_stalled", opts.now()),
+    closeGone: (row) => exitGoneSession(db, bus, row.sessionId, row.goalId, opts.now()),
   };
 }

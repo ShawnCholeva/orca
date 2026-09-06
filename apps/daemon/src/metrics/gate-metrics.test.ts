@@ -174,7 +174,7 @@ function costTransitions(usd: number): TemplateTransition[] {
   return [{
     templateVersion: 1, stepTemplateId: "__gate__:review",
     transition: { workflowRunId: "r0", boundary: "step_complete", createdAt: "2026-07-16T00:00:00.000Z",
-      telemetry: { latency_ms: 100, cost: { usd, tokens_in: 10, tokens_out: 5 } } } as never,
+      telemetry: { latency_ms: 100, cost: { usd, tokens_in: 10, tokens_out: 5, cache_read_tokens: 600, cache_creation_tokens: 85 } } } as never,
   }];
 }
 

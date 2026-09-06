@@ -168,6 +168,7 @@ describe("Task 1 + 2: Resume treats delegating parent as dormant; session-launch
           currentStepRunId: "sr-child-1",
           sessionId: null, // session-launch-lost: no live session
           providerRecoveryPending: false,
+        stepFinished: false,
         },
         // r-parent (delegating) is NOT in this list — correctly excluded by SQL
       ],
@@ -196,6 +197,7 @@ describe("Task 1 + 2: Resume treats delegating parent as dormant; session-launch
           currentStepRunId: "sr-child-1",
           sessionId: "sess-alive",
           providerRecoveryPending: false,
+        stepFinished: false,
         },
       ],
       isSessionAlive: async (id) => id === "sess-alive",

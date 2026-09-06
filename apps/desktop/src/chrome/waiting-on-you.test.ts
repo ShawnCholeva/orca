@@ -19,7 +19,7 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
       usd: 1.6, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
       coverage: { reported: 4, total: 4, silent: 0 }, rollupCheck: "not_applicable",
     },
-    stepsDelivered: 5, stepsBlocked: 0, spanRelaunches: 5, retriedCompletions: 0,
+    stepsDelivered: 5, stepsBlocked: 0, spanRelaunches: 5, retriedAttempts: 0,
     openInterventions: 1,
     progress: {
       lastProgressAt: null, lastProgressChannel: null,
