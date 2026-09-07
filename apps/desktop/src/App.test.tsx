@@ -512,10 +512,11 @@ describe("Goals rail waiting badge", () => {
     expect(chip).toHaveAttribute("title", "Run blocked — needs your attention: crashed 3 times (worker_exited_no_signal)");
   });
 
-  it("flips a goal's chip to COMPLETED when its run completes (workflow.run.completed)", async () => {
+  it("drops a goal from the rail when its run completes (workflow.run.completed)", async () => {
     // Run completion flips the goal to completed inside the daemon's transaction
     // and emits only workflow.run.completed — no goal.updated. The rail sat on
-    // "active" for a finished goal until the next reload.
+    // "active" for a finished goal until the next reload. Completed goals are
+    // not shown on the rail at all; archive is the reader's own "gone" state.
     let onEvent: ((event: { type: string; goalId: string | null }) => void) | undefined;
     openEventStreamMock.mockImplementation(
       (handlers: { onEvent: (event: { type: string; goalId: string | null }) => void }) => {
@@ -542,6 +543,7 @@ describe("Goals rail waiting badge", () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => expect(within(quiet).getByText("completed")).toBeInTheDocument());
+    await waitFor(() => expect(within(rail).queryByText("Quiet Goal")).not.toBeInTheDocument());
+    expect(within(rail).getByText("Waiting Goal")).toBeInTheDocument();
   });
 });

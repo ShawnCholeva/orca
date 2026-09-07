@@ -76,7 +76,9 @@ export default function App() {
   async function loadGoals() {
     try {
       const res = await listGoals();
-      setGoals(res.goals);
+      // The rail shows only goals with something left to do; a completed goal
+      // leaves it the moment its run reaches Done.
+      setGoals(res.goals.filter((g) => g.status !== "completed"));
     } catch {
       // connection status banner communicates the problem to the user
     }
