@@ -153,6 +153,19 @@ describe("isLowSignalTool curation", () => {
     expect(isLowSignalTool("Bash", { command: "git ls-files | grep goal" })).toBe(true);
     expect(isLowSignalTool("Bash", { command: "git status" })).toBe(true);
   });
+  it("keeps a multi-command script that only filters its own output through grep", () => {
+    // Writing a file with a heredoc and then running the suite, tail-filtered
+    // through grep, is real work: the trailing filter must not read as a search
+    // or the step vanishes from the checklist and the run looks stuck.
+    const command = [
+      "cd ~/app && cat > src/duration.test.ts <<'EOF'",
+      "import { it } from 'vitest';",
+      "EOF",
+      'pnpm vitest run src/duration.test.ts 2>&1 | grep -E "FAIL|Tests " | head -8',
+    ].join("\n");
+    expect(isLowSignalTool("Bash", { command })).toBe(false);
+  });
+
   it("keeps substantive work", () => {
     expect(isLowSignalTool("Read", { file_path: "/a.ts" })).toBe(false);
     expect(isLowSignalTool("Edit", { file_path: "/a.ts" })).toBe(false);

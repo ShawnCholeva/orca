@@ -138,10 +138,13 @@ export function isLowSignalTool(toolName: string, toolInput: unknown): boolean {
   if (toolName !== "Bash") return false;
   const command = (toolInput as { command?: unknown } | null)?.command;
   if (typeof command !== "string") return false;
-  // A pipeline filtered through a search is look-around (e.g. `cat x | grep y`).
-  if (/\|\s*(grep|rg|ag)\b/.test(command)) return true;
   const tokens = commandTokens(command);
   const first = tokens[0] ?? "";
+  // A pipeline filtered through a search is look-around (e.g. `cat x | grep y`).
+  // Anchored to the pipeline's source: a script that does real work and merely
+  // filters its own output (`cat > f <<EOF ... EOF; pnpm test | grep FAIL`) is
+  // not a search, and dropping it leaves the checklist silent mid-run.
+  if (READ_COMMANDS.has(first) && /\|\s*(grep|rg|ag)\b/.test(command)) return true;
   if (BASH_LOW_SIGNAL.has(first)) return true;
   if (first === "git" && GIT_READ_ONLY.has(tokens[1] ?? "")) return true;
   return false;
