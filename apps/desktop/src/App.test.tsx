@@ -511,4 +511,37 @@ describe("Goals rail waiting badge", () => {
     const chip = await within(rail).findByText("blocked");
     expect(chip).toHaveAttribute("title", "Run blocked — needs your attention: crashed 3 times (worker_exited_no_signal)");
   });
+
+  it("flips a goal's chip to COMPLETED when its run completes (workflow.run.completed)", async () => {
+    // Run completion flips the goal to completed inside the daemon's transaction
+    // and emits only workflow.run.completed — no goal.updated. The rail sat on
+    // "active" for a finished goal until the next reload.
+    let onEvent: ((event: { type: string; goalId: string | null }) => void) | undefined;
+    openEventStreamMock.mockImplementation(
+      (handlers: { onEvent: (event: { type: string; goalId: string | null }) => void }) => {
+        onEvent = handlers.onEvent;
+        return { close: vi.fn() };
+      },
+    );
+    getRunSummariesMock.mockReset();
+    getRunSummariesMock.mockResolvedValue([]);
+    render(
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>,
+    );
+    const rail = await screen.findByRole("complementary", { name: "Goals" });
+    const quiet = (await within(rail).findByText("Quiet Goal")).closest("li")!;
+    expect(within(quiet).getByText("active")).toBeInTheDocument();
+
+    listGoalsMock.mockResolvedValue({
+      goals: [goals[0], { ...goals[1], status: "completed" }],
+    });
+    await act(async () => {
+      onEvent!({ type: "workflow.run.completed", goalId: "g-quiet" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(within(quiet).getByText("completed")).toBeInTheDocument());
+  });
 });

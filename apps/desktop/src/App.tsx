@@ -41,7 +41,9 @@ function toErrorMessage(err: unknown, fallback: string): string {
 }
 
 const DETAIL_REFETCH_EVENTS = new Set<DomainEventType>(["goal.refined", "workspace.attached", "workspace.removed"]);
-const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived", "goal.worker_permission_mode_changed", "workspace.attached", "workspace.removed", "workspace.deleted"]);
+// workflow.run.completed is here because run completion flips the goal to
+// completed inside the daemon's own transaction without a goal.updated event.
+const GOAL_LIST_EVENTS = new Set<DomainEventType>(["goal.created", "goal.updated", "goal.archived", "goal.worker_permission_mode_changed", "workflow.run.completed", "workspace.attached", "workspace.removed", "workspace.deleted"]);
 
 export default function App() {
   const [onboardingState, setOnboardingState] = useState<OnboardingState>("checking");
