@@ -56,7 +56,22 @@ runGated("claude-code accepts the model flags Orca sends (real)", () => {
         contextVariant: "default",
         effort: null,
       });
-      await expect(execFileAsync("claude", ["-p", "hi", ...args], { timeout: 60_000 })).rejects.toThrow();
+      let caught: (NodeJS.ErrnoException & { stderr?: string }) | undefined;
+      try {
+        await execFileAsync("claude", ["-p", "hi", ...args], { timeout: 60_000 });
+      } catch (err) {
+        caught = err as NodeJS.ErrnoException & { stderr?: string };
+      }
+      if (!caught) {
+        expect.fail("expected claude to reject an unrecognized model id, but it exited successfully");
+      }
+      // err.code is the process exit status for a normal exit, but the string
+      // "ENOENT" when the binary is missing and undefined on a timeout kill —
+      // asserting it is the number 1 already rules both of those out. The
+      // stderr match is what actually pins this to model-id rejection rather
+      // than any other way execFile can reject.
+      expect(caught.code).toBe(1);
+      expect(caught.stderr).toMatch(/unrecognized_model|isn't described by this version's model catalog/i);
     },
     70_000,
   );
