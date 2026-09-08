@@ -106,6 +106,44 @@ describe("resolveChoice — profile", () => {
   });
 });
 
+describe("resolveChoice — profile ranking against realistic pricing tiers", () => {
+  const REALISTIC: CatalogModel[] = [
+    { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
+      supports1mSuffix: true, pricingTier: "haiku_45", advisorRank: 1,
+      supportedEfforts: [], defaultEffort: null },
+    { id: "claude-sonnet-5", family: "sonnet", displayName: "Sonnet 5", contextWindow: 1_000_000,
+      supports1mSuffix: false, pricingTier: "tier_2_10", advisorRank: 3,
+      supportedEfforts: ["low","medium","high","xhigh","max"], defaultEffort: "high" },
+    { id: "claude-3-7-sonnet", family: "sonnet", displayName: "Sonnet 3.7", contextWindow: 0,
+      supports1mSuffix: false, pricingTier: "tier_3_15", advisorRank: null,
+      supportedEfforts: [], defaultEffort: null },
+  ];
+
+  it("picks the cheapest model even when its pricing tier is not a tier_N_M string", () => {
+    const got = resolveChoice({ kind: "profile", ref: "light" }, REALISTIC, "claude-code", SEED_PROFILES);
+    expect(got?.modelId).toBe("claude-haiku-4-5");
+  });
+
+  it("excludes a legacy model with no advisor rank from profile resolution", () => {
+    const got = resolveChoice({ kind: "profile", ref: "light" }, [REALISTIC[2]], "claude-code", SEED_PROFILES);
+    expect(got).toBeNull();
+  });
+
+  it("still allows a legacy model to be pinned directly", () => {
+    const got = resolveChoice(
+      { kind: "pinned", adapterId: "claude-code", modelId: "claude-3-7-sonnet", contextVariant: "default", effort: null },
+      REALISTIC, "claude-code", SEED_PROFILES,
+    );
+    expect(got?.modelId).toBe("claude-3-7-sonnet");
+  });
+
+  it("still excludes an unparseable tier from a budget-BOUNDED profile", () => {
+    const profiles = [{ id: "cheap", displayName: "Cheap", requires: { maxPricingTier: "tier_5_25" }, rank: "cheapest" as const }];
+    const got = resolveChoice({ kind: "profile", ref: "cheap" }, [REALISTIC[0]], "claude-code", profiles);
+    expect(got).toBeNull();
+  });
+});
+
 describe("resolveChoice — an adapter with no effort axis", () => {
   it("leaves effort null when the model declares no supported efforts", () => {
     const catalog: CatalogModel[] = [{

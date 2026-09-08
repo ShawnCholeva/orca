@@ -50,13 +50,19 @@ export function resolveChoice(
 
   const profile = profiles.find((p) => p.id === selection.ref);
   if (!profile) return null;
-  const eligible = catalog.filter((m) => meets(m, profile));
+  // Legacy models (no advisorRank) are not part of the CLI's advised lineup —
+  // they remain pinnable but are never chosen for a profile.
+  const eligible = catalog.filter((m) => m.advisorRank !== null && meets(m, profile));
   if (eligible.length === 0) return null;
 
+  // advisorRank leads; pricingRank only tiebreaks. A model's price string can
+  // be unparseable (e.g. "haiku_45") without that making it any less the
+  // cheapest model in the advised lineup — pricingRank alone would sort it
+  // last via its UNPARSEABLE sentinel.
   const sorted = [...eligible].sort((a, b) =>
     profile.rank === "cheapest"
-      ? pricingRank(a.pricingTier) - pricingRank(b.pricingTier)
-      : (b.advisorRank ?? -1) - (a.advisorRank ?? -1),
+      ? (a.advisorRank as number) - (b.advisorRank as number) || pricingRank(a.pricingTier) - pricingRank(b.pricingTier)
+      : (b.advisorRank as number) - (a.advisorRank as number) || pricingRank(a.pricingTier) - pricingRank(b.pricingTier),
   );
   const model = sorted[0];
   return {
