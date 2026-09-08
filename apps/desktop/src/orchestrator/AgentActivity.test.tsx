@@ -23,6 +23,45 @@ describe("AgentActivity", () => {
     expect(screen.getByTestId("agent-activity-active").textContent).toContain("Ran tests: pnpm test");
   });
 
+  it("keeps pulsing between tool calls, when no step is active but the turn is live", () => {
+    // The dead window: every row checked, the turn still running, and nothing on
+    // screen saying so. OrcaChat's fallback row cannot cover this either — it is
+    // suppressed precisely because this activity is active.
+    render(<AgentActivity activity={baseActivity({
+      status: "active",
+      steps: [{ id: "1", text: "Edited .gitignore", category: "editing", status: "done", createdAt: "t" }],
+    })} />);
+    expect(screen.getByTestId("agent-activity-active").textContent).toContain("Working…");
+  });
+
+  it("does not repeat the step name on the live line when rows already sit under that header", () => {
+    render(<AgentActivity activity={baseActivity({
+      status: "active", stepName: "Root Cause",
+      steps: [{ id: "1", text: "Edited .gitignore", category: "editing", status: "done", createdAt: "t" }],
+    })} />);
+    expect(screen.getByTestId("agent-activity-active").textContent).not.toContain("Root Cause");
+  });
+
+  it("still names the step on the live line for a turn that has produced nothing yet", () => {
+    render(<AgentActivity activity={baseActivity({ status: "active", stepName: "Root Cause", steps: [] })} />);
+    expect(screen.getByTestId("agent-activity-active").textContent).toContain("Root Cause");
+  });
+
+  it("gives no pulse to a segment that does not own the tail", () => {
+    render(<AgentActivity showTail={false} activity={baseActivity({
+      status: "active",
+      steps: [{ id: "1", text: "Edited .gitignore", category: "editing", status: "done", createdAt: "t" }],
+    })} />);
+    expect(screen.queryByTestId("agent-activity-active")).toBeNull();
+  });
+
+  it("renders nothing for a segment with no header, no rows and no tail", () => {
+    const { container } = render(
+      <AgentActivity showHead={false} showTail={false} activity={baseActivity({ status: "active", steps: [] })} />
+    );
+    expect(container.querySelector(".agent-activity")).toBeNull();
+  });
+
   it("shows the closing summary when completed", () => {
     render(<AgentActivity activity={baseActivity({
       status: "completed", finalSummary: "Found the double-charge bug.",

@@ -175,6 +175,73 @@ describe("getWorkflowStepRunById", () => {
     expect(getWorkflowStepRunById(db, "sr1")?.judgePending).toBe(true);
   });
 
+  it("reports awaitingUser for an open question with no park and no chat-reply flag", () => {
+    // The third channel. An orchestrator-source ask_user raises no activity row,
+    // and its awaiting_user flag is cleared by the next action that posts no chat
+    // reply — the prompt gate suppressing a duplicate ask does exactly that, with
+    // no user involvement. Reading only the other two, this projection told the
+    // desktop the step was working while a question sat unanswered on screen.
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr1");
+    resetWorkflowStepProjectionPreparedStatements();
+    expect(getWorkflowStepRunById(db, "sr1")?.awaitingUser).toBe(false);
+
+    db.prepare(
+      `INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
+       VALUES ('om-1', 'goal-1', 'orchestrator', 'message', 'A decision is needed.', NULL, ?, ?)`
+    ).run(
+      NOW,
+      JSON.stringify({
+        questionId: "q-1", toolUseId: "tu-1", source: "orchestrator", stepRunId: "sr1",
+        questions: [{ header: "Approach", question: "Which way?", multiSelect: false, options: [{ label: "A", description: "a" }] }],
+      })
+    );
+    resetWorkflowStepProjectionPreparedStatements();
+    expect(getWorkflowStepRunById(db, "sr1")?.awaitingUser).toBe(true);
+  });
+
+  it("clears awaitingUser once that question is answered or withdrawn", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr1");
+    const question = (extra: Record<string, unknown>) =>
+      JSON.stringify({
+        questionId: "q-1", toolUseId: "tu-1", source: "orchestrator", stepRunId: "sr1",
+        questions: [{ header: "Approach", question: "Which way?", multiSelect: false, options: [{ label: "A", description: "a" }] }],
+        ...extra,
+      });
+    db.prepare(
+      `INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
+       VALUES ('om-1', 'goal-1', 'orchestrator', 'message', 'A decision is needed.', NULL, ?, ?)`
+    ).run(NOW, question({ answer: { freeText: "A" } }));
+    resetWorkflowStepProjectionPreparedStatements();
+    expect(getWorkflowStepRunById(db, "sr1")?.awaitingUser).toBe(false);
+
+    db.prepare("UPDATE orchestrator_messages SET pending_question = ? WHERE id = 'om-1'")
+      .run(question({ withdrawn: true }));
+    resetWorkflowStepProjectionPreparedStatements();
+    expect(getWorkflowStepRunById(db, "sr1")?.awaitingUser).toBe(false);
+  });
+
+  it("does not let another step run's open question park this one", () => {
+    const db = setup();
+    seedGoal(db, "goal-1");
+    insertMinimalStepRun(db, "sr1");
+    db.prepare(
+      `INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
+       VALUES ('om-1', 'goal-1', 'orchestrator', 'message', 'A decision is needed.', NULL, ?, ?)`
+    ).run(
+      NOW,
+      JSON.stringify({
+        questionId: "q-1", toolUseId: "tu-1", source: "orchestrator", stepRunId: "some-other-step-run",
+        questions: [{ header: "Approach", question: "Which way?", multiSelect: false, options: [{ label: "A", description: "a" }] }],
+      })
+    );
+    resetWorkflowStepProjectionPreparedStatements();
+    expect(getWorkflowStepRunById(db, "sr1")?.awaitingUser).toBe(false);
+  });
+
   it("parses step_result_json for terminal steps", () => {
     const db = setup();
     seedGoal(db, "goal-1");

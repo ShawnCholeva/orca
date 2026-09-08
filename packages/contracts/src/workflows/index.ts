@@ -552,7 +552,21 @@ export type WorkflowStepResult = z.infer<typeof WorkflowStepResult>;
 // the step parking: "reviewing" the worker's output (judge turn) or running an
 // "independent_check" (adversarial refute turn). Cleared (null) once the step
 // parks/completes. Surfaced only as a live thinking status, never persisted.
-export const OrchestratorStepPhase = z.enum(["reviewing", "independent_check"]);
+/**
+ * The orchestrator's live phase on a step run, surfaced as a thinking row.
+ *
+ * `reading_reply` and `reviewing` are the same code path judging the same turn,
+ * split because they are different claims to the reader: the worker's turn ends
+ * for many reasons, and only one of them is "here is the finished step output".
+ * Which applies is decided from the agent's own text (an `orca:step-complete`
+ * fence) BEFORE the judge runs, so the label never promises a review of output
+ * that was never produced.
+ */
+export const OrchestratorStepPhase = z.enum([
+  "reading_reply",
+  "reviewing",
+  "independent_check",
+]);
 export type OrchestratorStepPhase = z.infer<typeof OrchestratorStepPhase>;
 
 export const WorkflowStepRun = z
@@ -2131,6 +2145,13 @@ export const OrchestratorAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("approve_step_complete"), scoring: z.unknown().optional(), rationale: z.string().max(2000).optional() }),
   z.object({ kind: z.literal("revise_step"), feedback: z.string().min(1).max(4000), rationale: z.string().max(2000).optional() }),
   z.object({ kind: z.literal("escalate_to_user"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
+  // The user asked for the work to stop. Before this existed the vocabulary had
+  // no verb for it, so "stop" could only ever be answered with prose — and the
+  // orchestrator answered "Stopping here — no further work is being started"
+  // while being structurally incapable of stopping anything. The run kept going,
+  // restarted itself three times, and blocked. An action the model can claim but
+  // not perform is worse than one it does not have.
+  z.object({ kind: z.literal("stop_run"), body: z.string().min(1).max(8000), rationale: z.string().max(2000).optional() }),
   // The step agent needs a decision from the user: surface structured options as
   // an interactive choice, not prose. The answer flows back as user guidance.
   z.object({ kind: z.literal("ask_user"), body: z.string().min(1).max(8000), questions: z.array(AskUserQuestionItem).min(1).max(4), rationale: z.string().max(2000).optional() }),

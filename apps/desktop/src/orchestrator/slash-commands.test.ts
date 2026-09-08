@@ -27,7 +27,8 @@ describe("matchSlashCommands", () => {
     expect(matchSlashCommands("/")).toEqual(SLASH_COMMANDS);
   });
   it("filters by prefix", () => {
-    expect(matchSlashCommands("/st").map((c) => c.name)).toEqual(["stuck"]);
+    expect(matchSlashCommands("/st").map((c) => c.name)).toEqual(["stuck", "stop"]);
+    expect(matchSlashCommands("/sto").map((c) => c.name)).toEqual(["stop"]);
     expect(matchSlashCommands("/zz")).toEqual([]);
   });
   it("offers nothing once the command has arguments", () => {

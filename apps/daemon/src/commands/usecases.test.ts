@@ -253,3 +253,106 @@ describe("runGoalCommand", () => {
     expect(rows.c).toBe(0);
   });
 });
+
+describe("runGoalCommand /stop", () => {
+  it("pauses the run and shuts the worker down", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId, runId, sessionId } = seedRunningWorkerStep(db);
+    const terminate = vi.fn(async () => {});
+
+    const result = await runGoalCommand(
+      { db, bus, now: () => NOW, idFactory, workerTerminate: terminate },
+      goalId,
+      { command: "stop" }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(
+      (db.prepare("SELECT status AS s FROM workflow_runs WHERE id = ?").get(runId) as { s: string }).s
+    ).toBe("paused");
+    expect(terminate).toHaveBeenCalledWith(sessionId);
+  });
+
+  it("does NOT let the worker's termination block the run", async () => {
+    // Pausing before terminating is what keeps this a clean, resumable stop: a
+    // worker session ending under an ACTIVE run routes through the crash path,
+    // whose `stopped` branch blocks the run outright. Ordering is the guard.
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId, runId, sessionId } = seedRunningWorkerStep(db);
+    makeServiceWithSubscriber(db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" })));
+
+    await runGoalCommand(
+      {
+        db, bus, now: () => NOW, idFactory,
+        workerTerminate: async (id) => {
+          db.prepare("UPDATE sessions SET status = 'stopped' WHERE id = ?").run(id);
+          bus.publish({
+            id: idFactory(), type: "session.failed", goalId, createdAt: NOW,
+            payload: { sessionId: id, goalId },
+          } as never);
+        },
+      },
+      goalId,
+      { command: "stop" }
+    );
+
+    const run = db.prepare("SELECT status AS s FROM workflow_runs WHERE id = ?").get(runId) as { s: string };
+    expect(run.s).toBe("paused");
+    expect(sessionId).toBe("sess-1");
+  });
+
+  it("records the stop request as its own event, ahead of the pause that honours it", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId, runId } = seedRunningWorkerStep(db);
+
+    await runGoalCommand({ db, bus, now: () => NOW, idFactory }, goalId, { command: "stop" });
+
+    const types = (
+      db.prepare("SELECT type AS t, payload AS p FROM events WHERE goal_id = ? ORDER BY seq ASC").all(goalId) as {
+        t: string; p: string;
+      }[]
+    ).filter((e) => e.t.startsWith("workflow.run."));
+    expect(types.map((e) => e.t)).toEqual(["workflow.run.stop_requested", "workflow.run.paused"]);
+    const payload = JSON.parse(types[0].p) as { source: string; workflowRunId: string };
+    expect(payload.source).toBe("user_command");
+    expect(payload.workflowRunId).toBe(runId);
+  });
+
+  it("still records the ask when there is no run to stop", async () => {
+    // Otherwise a stop that went unhonoured is indistinguishable from one that
+    // was never made — which is precisely the question this event exists to answer.
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId, runId } = seedRunningWorkerStep(db);
+    db.prepare("UPDATE workflow_runs SET status = 'completed' WHERE id = ?").run(runId);
+
+    const result = await runGoalCommand({ db, bus, now: () => NOW, idFactory }, goalId, { command: "stop" });
+
+    expect(result.message).toContain("nothing to stop");
+    const rows = db
+      .prepare("SELECT payload AS p FROM events WHERE goal_id = ? AND type = 'workflow.run.stop_requested'")
+      .all(goalId) as { p: string }[];
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].p).workflowRunId).toBeNull();
+  });
+
+  it("says so in the chat thread, from both sides", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId } = seedRunningWorkerStep(db);
+
+    await runGoalCommand({ db, bus, now: () => NOW, idFactory }, goalId, { command: "stop" });
+
+    const rows = db
+      .prepare("SELECT role AS r, body AS b FROM orchestrator_messages WHERE goal_id = ? ORDER BY created_at ASC")
+      .all(goalId) as { r: string; b: string }[];
+    expect(rows.some((m) => m.r === "user" && m.b === "Stop the run.")).toBe(true);
+    expect(rows.some((m) => m.r !== "user" && m.b.includes("Stopped."))).toBe(true);
+  });
+
+  it("rejects an unknown command without reinterpreting it", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { goalId } = seedRunningWorkerStep(db);
+    await expect(
+      runGoalCommand({ db, bus, now: () => NOW, idFactory }, goalId, { command: "halt" })
+    ).rejects.toBeInstanceOf(UnknownCommandError);
+  });
+});

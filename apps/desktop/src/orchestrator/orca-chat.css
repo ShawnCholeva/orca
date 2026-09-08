@@ -319,26 +319,32 @@
   font-family: "JetBrains Mono", ui-monospace, monospace;
 }
 
+/* Status colors come from the theme's state tokens, never from a literal. These
+   were light-mode hex values (#92400e, #0f766e, #1d4ed8, #b91c1c) painted on a
+   translucent tint, which resolves over whatever surface is behind it — so in
+   every dark theme the app ships, each chip rendered a dark color on a dark
+   panel. The blocked chip in particular, the one that exists to be noticed,
+   was the least legible thing on the screen. */
 .workflow-banner-status--active {
-  color: #0f766e;
-  background: rgba(16, 185, 129, 0.14);
+  color: var(--run);
+  background: var(--run-soft);
 }
 
 .workflow-banner-status--paused,
 .workflow-banner-status--blocked {
-  color: #92400e;
-  background: rgba(245, 158, 11, 0.16);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .workflow-banner-status--completed {
-  color: #1d4ed8;
-  background: rgba(59, 130, 246, 0.16);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .workflow-banner-status--failed,
 .workflow-banner-status--cancelled {
-  color: #b91c1c;
-  background: rgba(239, 68, 68, 0.14);
+  color: var(--err);
+  background: var(--err-soft);
 }
 
 .workflow-banner-grid {
@@ -420,18 +426,18 @@
 }
 
 .workflow-influence-effect--required {
-  color: #92400e;
-  background: rgba(245, 158, 11, 0.16);
+  color: var(--warn);
+  background: var(--warn-soft);
 }
 
 .workflow-influence-effect--missing {
-  color: #b91c1c;
-  background: rgba(239, 68, 68, 0.14);
+  color: var(--err);
+  background: var(--err-soft);
 }
 
 .workflow-influence-effect--satisfied {
-  color: #0f766e;
-  background: rgba(16, 185, 129, 0.14);
+  color: var(--run);
+  background: var(--run-soft);
 }
 
 .workflow-banner-artifact-list {
@@ -465,6 +471,14 @@
   display: flex;
   gap: 10px;
   max-width: 92%;
+}
+
+/* Holds the avatar column open for a turn's continuation segments, so the
+   thread below a diff stays aligned with the rows above it instead of sliding
+   left into the gutter. Width matches the 28px OrcaMark. */
+.msg-mark-spacer {
+  flex: 0 0 28px;
+  width: 28px;
 }
 
 .msg--user {
@@ -646,6 +660,14 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--text);
+}
+
+/* Why an unscored step ended the way it did. On the card's face, not behind a
+   caret: it is the only thing on an unscored result the reader can act on. */
+.step-result-cause {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
 }
 
 .step-result-state,
@@ -1464,23 +1486,40 @@
   gap: 4px;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  background: var(--warn-soft);
 }
-.orca-chat-blocked-title { font-weight: 600; color: #92400e; font-size: 13px; }
+.orca-chat-blocked-title { font-weight: 600; color: var(--warn); font-size: 13px; }
 .orca-chat-blocked-reason { margin: 0; color: var(--text-2); font-size: 12px; }
 .orca-chat-blocked-resume-btn {
   align-self: flex-start;
   cursor: pointer;
   padding: 6px 12px;
   border-radius: 6px;
-  border: 1px solid rgba(245, 158, 11, 0.5);
-  background: var(--bg, #fff);
+  border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent);
+  /* `--bg-3` is not a token this app defines, so the hover state fell through to
+     a black wash that read as disabled on a dark panel. `--raised` is the real
+     one-step-up surface. */
+  background: var(--panel);
+  color: var(--text);
   font-size: 13px;
 }
-.orca-chat-blocked-resume-btn:hover:not(:disabled) { background: var(--bg-3, rgba(0,0,0,0.06)); }
+.orca-chat-blocked-resume-btn:hover:not(:disabled) { background: var(--raised); }
 .orca-chat-blocked-resume-btn:disabled { cursor: not-allowed; opacity: 0.6; }
-.orca-chat-blocked-resume-error { margin: 0; color: #92400e; font-size: 12px; }
+.orca-chat-blocked-resume-error { margin: 0; color: var(--err); font-size: 12px; }
+
+/* A run the operator stopped is at the same standstill as a blocked one, but it
+   is not a problem — it is their instruction being carried out. Amber would read
+   as "something went wrong"; this is the neutral, informational variant. */
+.orca-chat-blocked--stopped {
+  border-color: var(--hairline-strong);
+  background: var(--raised);
+}
+.orca-chat-blocked--stopped .orca-chat-blocked-title { color: var(--text); }
+.orca-chat-blocked--stopped .orca-chat-blocked-resume-btn {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
 
 /* Human routing choice for an undecidable splitter: pick the next step. Neutral
    (not alarming) — it's an awaiting-input state, not an error. */

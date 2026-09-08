@@ -48,9 +48,15 @@ import { stepToolRiskClass, shouldRefute } from "./refute-gate.js";
 import { stepCompletionGate } from "./requires-execution.js";
 import { judgeAgentResponse } from "./judgement.js";
 import { sanitizeNarration } from "./sanitize-narration.js";
-import { extractOrcaStepCompleteBlock } from "./orca-output.js";
+import { claimsStepComplete, extractOrcaStepCompleteBlock } from "./orca-output.js";
+import { stopRunForGoal } from "./stop-run.js";
 import { completeStepWithLedger } from "./ledger-commit.js";
-import { formatRevisionForWorker, incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
+import {
+  formatRevisionForWorker,
+  incrementReviseAttempt,
+  REVISE_CAP,
+  summarizeEscalationFeedback,
+} from "./revise-loop.js";
 import { incrementCrashRetry, isSubstrateRelaunch, CRASH_RETRY_CAP } from "./crash-retry.js";
 import {
   buildEvaluationFailedStepResult,
@@ -95,6 +101,7 @@ import { buildEvidenceFacet, evaluateGrounding, localWorkspaceProbe } from "../.
 import { availableSensorKinds } from "../../harness-sensors/detect.js";
 import { postOrchestratorMessage } from "./orchestrator-message.js";
 import { isHumanPromptOpen, readOpenWorkerQuestion } from "./human-prompt-gate.js";
+import { isWorkerTurnOpen } from "../../activities/awaiting-user.js";
 import { recordPromptSuppressed, recordWorkerQuestionAnswer } from "../../orchestrator-chat/usecases.js";
 import { assembleFreeTextReason } from "./worker-answer-format.js";
 
@@ -918,12 +925,25 @@ export class OrchestratorService {
     const modelId = goal.orchestrator_model;
 
     // Honest in-progress status for the otherwise-silent window between the
-    // worker finishing and the step parking: "reviewing" the output (judge
-    // turn), then an "independent_check" (set inside maybeRefute, only when the
-    // refute actually runs — so steps the gate skips never flash it). Always
-    // cleared in `finally` so it never sticks on a pause, completion, or error.
+    // worker finishing and the step parking: the judge turn, then an
+    // "independent_check" (set inside maybeRefute, only when the refute actually
+    // runs — so steps the gate skips never flash it). Always cleared in `finally`
+    // so it never sticks on a pause, completion, or error.
+    //
+    // This hook fires when the worker's TURN ends, which is not the same fact as
+    // the worker finishing the step: a turn also ends on a question, an
+    // observation, or a request for guidance, and the judge's verdict for those
+    // is another question rather than a completion. Naming the phase from the
+    // agent's own completion claim keeps the label from promising a review of
+    // output that does not exist.
     const phaseScope = { goalId: run.goalId, workflowRunId: run.id, stepRunId: stepRun.id };
-    this.setStepPhase(db, now, phaseScope, "reviewing", options);
+    this.setStepPhase(
+      db,
+      now,
+      phaseScope,
+      claimsStepComplete(payload.responseText) ? "reviewing" : "reading_reply",
+      options
+    );
     try {
       let action: OrchestratorAction;
       try {
@@ -1147,6 +1167,34 @@ export class OrchestratorService {
       case "answer_user_directly":
       case "escalate_to_user": {
         postOrchestratorMessage(db, now, ctx.run.goalId, sanitizeNarration(action.body), options);
+        return { postedChatReply: true };
+      }
+      case "stop_run": {
+        // The stop happens FIRST and the acknowledgment is written from its
+        // result. The mediator used to answer a stop with prose alone — it had no
+        // other verb — and told the user "no further work is being started" over a
+        // run that then restarted itself three times. Never let the sentence be
+        // the only thing that stops.
+        const outcome = await stopRunForGoal(
+          {
+            db,
+            bus: options.bus ?? new EventBus(),
+            now,
+            idFactory: options.idFactory,
+            workerTerminate: this.workerTerminate,
+          },
+          ctx.run.goalId,
+          "orchestrator_action"
+        );
+        postOrchestratorMessage(
+          db,
+          now,
+          ctx.run.goalId,
+          outcome.stopped
+            ? `${sanitizeNarration(action.body)}\n\nThe run is stopped and the agent has been shut down. Press Resume run when you want to pick it back up.`
+            : "There's no run going right now, so there's nothing to stop.",
+          options
+        );
         return { postedChatReply: true };
       }
       case "answer_open_question": {
@@ -1843,11 +1891,26 @@ export class OrchestratorService {
         counter.nextAttempt,
         ctx.stepRun.id
       );
+      publishStaged(options.bus, [
+        appendWorkflowEvent(
+          db,
+          "workflow.step.revise_capped",
+          {
+            goalId: ctx.run.goalId,
+            workflowRunId: ctx.run.id,
+            stepRunId: ctx.stepRun.id,
+            attempts: counter.nextAttempt,
+          },
+          now(),
+          options.idFactory
+        ),
+      ]);
       postOrchestratorMessage(
         db,
         now,
         ctx.run.goalId,
-        `Step needs help after ${REVISE_CAP} revision attempts:\n${feedback}`,
+        `This step has tried ${REVISE_CAP} times and still isn't passing. Here's what's blocking it:\n\n` +
+          summarizeEscalationFeedback(feedback),
         options
       );
       return { postedChatReply: true };
@@ -2272,7 +2335,19 @@ export class OrchestratorService {
     const { postedChatReply } = await this.applyOrchestratorAction(
       db, now, ctx, sessionId, "", resolved, options
     );
-    this.setAwaitingUser(db, stepRun.id, postedChatReply);
+    // A chat reply parks the run on the human only if the WORKER is not still
+    // going. Every other caller of setAwaitingUser runs after a worker turn has
+    // ended, where "the orchestrator replied" and "the human owes the next move"
+    // are the same fact. Here they are not: the user can type at any moment,
+    // including mid-turn, and answering them does not make the agent stop. Marking
+    // that a park named the reader as the bottleneck over an agent that was not
+    // waiting on them — it inflated parked time in the metrics and put "waiting on
+    // you" over live work.
+    this.setAwaitingUser(
+      db,
+      stepRun.id,
+      postedChatReply && !isWorkerTurnOpen(db, stepRun.id)
+    );
     // Some actions need a durable acknowledgment after applying their side effect.
     if (!postedChatReply) {
       const acknowledgment = this.acknowledgeUserMessageAction(resolved, sessionId);

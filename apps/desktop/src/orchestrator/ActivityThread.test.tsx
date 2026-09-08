@@ -591,27 +591,62 @@ describe("ActivityCard", () => {
     expect(card).toHaveTextContent("Followed instructions");
   });
 
-  it("leads a failed evaluation with a label, hides the raw reason and percentages in the drawer", () => {
+  it("says what happened to a blocked step and puts the cause on the card, not behind a caret", () => {
+    // The regression this replaces: a step the daemon stopped after three
+    // restarts announced itself as "Evaluation failed" — the least informative
+    // field on the record — while "no progress after 3 restarts" sat two clicks
+    // away, behind a toggle labelled "Scores", over an all-zero self-assessment
+    // that nothing had actually scored.
     const baseResult = stepResultActivity().stepResult!;
-    const failed = stepResultActivity({
+    const blocked = stepResultActivity({
       stepResult: {
         ...baseResult,
+        stepStatus: "blocked",
         evaluationStatus: "failed",
         successScore: 0,
         quality: { outputCompleteness: 0, outputCorrectness: 0, instructionAdherence: 0, downstreamReadiness: 0, riskLevel: 1 },
-        outcome: { ...baseResult.outcome, reason: "step result evaluation failed: shadow timeout", handoffReady: false },
+        outcome: { ...baseResult.outcome, reason: "step result evaluation failed: no progress after 3 restarts", handoffReady: false },
       },
     });
-    render(<ActivityCard activity={failed} />);
+    render(<ActivityCard activity={blocked} />);
     const card = screen.getByTestId("step-result-card");
-    // headline is the short label, not the raw internal reason
-    expect(screen.getByTestId("step-result-summary")).toHaveTextContent("Evaluation failed");
-    expect(card).not.toHaveTextContent("shadow timeout");
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent(
+      "Orca stopped this step before it finished.",
+    );
+    // The cause is legible without opening anything, and without its internal prefix.
+    expect(screen.getByTestId("step-result-cause")).toHaveTextContent("No progress after 3 restarts");
+    expect(card).not.toHaveTextContent("step result evaluation failed:");
+    // Nothing scored this, so it is not offered as a score.
+    expect(screen.getByTestId("step-result-expand")).toHaveTextContent("Details");
     expect(card).not.toHaveTextContent("%");
-    // the raw diagnostic reason lives in the drawer
     fireEvent.click(screen.getByTestId("step-result-expand"));
-    expect(card).toHaveTextContent("step result evaluation failed: shadow timeout");
     expect(card).not.toHaveTextContent("%");
+    expect(card).toHaveTextContent("never scored");
+  });
+
+  it("names the other unscored outcomes by what actually happened", () => {
+    const baseResult = stepResultActivity().stepResult!;
+    const unscored = (stepStatus: string) =>
+      stepResultActivity({
+        stepResult: {
+          ...baseResult,
+          stepStatus,
+          evaluationStatus: "failed",
+          outcome: { ...baseResult.outcome, reason: "step result evaluation failed: shadow timeout" },
+        },
+      } as Partial<Activity>);
+
+    const { unmount } = render(<ActivityCard activity={unscored("completed")} />);
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent(
+      "This step finished, but Orca couldn't check the result.",
+    );
+    expect(screen.getByTestId("step-result-cause")).toHaveTextContent("Shadow timeout");
+    unmount();
+
+    render(<ActivityCard activity={unscored("failed")} />);
+    expect(screen.getByTestId("step-result-summary")).toHaveTextContent(
+      "This step failed before it produced a result.",
+    );
   });
 
   it("leads with resultSummary and shows artifact without expanding; hides scores until expanded", () => {

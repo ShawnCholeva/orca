@@ -392,7 +392,11 @@ describe("workflow step usecases", () => {
       evaluationStatus: "failed",
       successScore: 0,
       outcome: {
-        reason: "step result evaluation failed: orchestrator scoring not supplied",
+        // The step's OWN cause, not the internal "the orchestrator never handed us
+        // a score". This reason is now shown on the face of the result card, so a
+        // reader sees why the step ended — "no progress after 3 restarts" — instead
+        // of a sentence about the harness's internal bookkeeping.
+        reason: "step result evaluation failed: Need input",
         blockingIssuesCount: 1,
         handoffReady: false,
       },

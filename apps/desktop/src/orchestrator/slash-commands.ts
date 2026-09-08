@@ -4,12 +4,20 @@ export interface SlashCommand {
   describe: string;
 }
 
-/** One entry today. Adding another is one object — no framework needed. */
 export const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "stuck",
     args: "[what's happening]",
     describe: "Tell Orca this step isn't going anywhere so it can restart the agent.",
+  },
+  {
+    // The deterministic way to stop. Typing "stop" as an ordinary message goes to
+    // the mediator, which now has a stop_run action for exactly that — but a
+    // model's reading of a sentence is a tendency, and stopping is not something
+    // to leave to a tendency. This path takes no interpretation.
+    name: "stop",
+    args: "",
+    describe: "Stop the run now and shut the agent down. Resume when you're ready.",
   },
 ];
 

@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { isParkedOnActivity } from "../../activities/awaiting-user.js";
+import { isParkedOnHuman, openQuestionColumn } from "../../activities/awaiting-user.js";
 
 import type { EventBus } from "../../events.js";
 import { exitGoneSession, failSession } from "../../sessions/runtime.js";
@@ -16,10 +16,23 @@ export interface WatchdogStepRow {
   outputSeq: number;
   /** Latest hook-driven activity update for this step run, epoch ms; null if none. */
   activityAtMs: number | null;
-  /** True when Orca owes the next move (nothing is waiting on the user). */
+  /**
+   * True when Orca owes the next move — nothing is waiting on the user, by ANY
+   * of the three channels: an open card (the activity row), a chat reply the
+   * orchestrator posted and stopped on (`workflow_step_runs.awaiting_user`), or an
+   * unanswered question sitting on a chat message (`isHumanPromptOpen`).
+   */
   systemTurn: boolean;
   /** The step's work is done (`finished_at` set); the run is parked on a human. */
   stepWorkDone: boolean;
+  /**
+   * True when a tool call is currently in flight — a step row on the live
+   * activity opened on `tool_use` and has not been closed by its `tool_result`.
+   * Such a worker is not idle, it is BLOCKED ON ITS OWN TOOL, and the two look
+   * identical from the outside: a long install, a cold build or a slow network
+   * fetch emits no PTY output and no activity update for as long as it runs.
+   */
+  toolInFlight: boolean;
 }
 
 /** Last observed progress for a step run, carried across ticks. */
@@ -45,6 +58,17 @@ export interface LivenessWatchdogDeps {
   graceMs: number;
   /** System-turn idle time (ms) tolerated before a live worker is reaped. */
   stallMs: number;
+  /**
+   * The larger budget for a worker sitting inside an unfinished tool call.
+   *
+   * Silence is only evidence of a stall when nothing is running. With a tool in
+   * flight the same silence is the expected shape of real work, so the ordinary
+   * budget would reap a healthy agent mid-build and spend a rescue on it. It is
+   * still a budget rather than an exemption: a tool that genuinely never returns
+   * must eventually reach a human, and an in-flight flag that suppressed the
+   * sensor outright would hide exactly that.
+   */
+  toolStallMs: number;
   /** Progress marks by step run; owned by the caller so state survives ticks. */
   progress: Map<string, ProgressMark>;
   /** Emit the terminal failure signal for a live-but-idle worker. */
@@ -69,6 +93,10 @@ export interface LivenessWatchdogDeps {
  * A second sensor catches a worker that is alive but stuck: no PTY output and no
  * activity progress for `stallMs`, while it is Orca's turn to move (not waiting
  * on the user). That worker is reaped the same way, with reason `worker_stalled`.
+ * "Waiting on the user" here is the UNION of both park channels — a worker idle
+ * behind an unanswered chat reply is behaving correctly, and reaping it spends
+ * the rescue budget on a step that was never stuck. A worker sitting inside an
+ * unfinished tool call is likewise not idle, and gets `toolStallMs` instead.
  *
  * Grace window: a worker between spawn and tmux-session creation is not yet
  * observable as alive; a session still inside its grace window (or with no
@@ -122,7 +150,12 @@ export async function livenessWatchdogTick(deps: LivenessWatchdogDeps): Promise<
         });
         continue;
       }
-      if (now - mark.sinceMs < deps.stallMs) continue;
+      // A worker inside a tool call gets the longer budget: its silence is the
+      // tool's, not its own. `mark.sinceMs` is when progress last moved, which for
+      // an in-flight tool is the moment that tool started — so this measures the
+      // tool's own age, which is the thing being judged.
+      const budgetMs = row.toolInFlight ? deps.toolStallMs : deps.stallMs;
+      if (now - mark.sinceMs < budgetMs) continue;
       deps.progress.delete(row.stepRunId);
       deps.reapStalled(row);
     } catch (err) {
@@ -144,12 +177,14 @@ export function buildLivenessWatchdogDeps(
     now: () => string;
     graceMs: number;
     stallMs: number;
+    toolStallMs: number;
     progress: Map<string, ProgressMark>;
   }
 ): LivenessWatchdogDeps {
   return {
     graceMs: opts.graceMs,
     stallMs: opts.stallMs,
+    toolStallMs: opts.toolStallMs,
     progress: opts.progress,
     nowMs: () => Date.parse(opts.now()),
     isTmuxAlive: opts.isTmuxAlive,
@@ -167,8 +202,14 @@ export function buildLivenessWatchdogDeps(
           `SELECT s.id AS session_id, wsr.goal_id AS goal_id, wsr.id AS step_run_id,
                   s.started_at AS started_at, s.output_seq AS output_seq,
                   ${stepWorkDoneSql('wsr')} AS step_work_done,
+                  wsr.awaiting_user AS awaiting_user,
+                  ${openQuestionColumn('wsr')},
                   a.status AS activity_status, a.source_kind AS activity_source_kind,
-                  a.updated_at AS activity_updated_at
+                  a.updated_at AS activity_updated_at,
+                  EXISTS (
+                    SELECT 1 FROM activity_steps st
+                     WHERE st.activity_id = a.id AND st.status = 'active'
+                  ) AS tool_in_flight
            FROM sessions s
            JOIN workflow_step_runs wsr ON wsr.id = s.workflow_step_run_id AND wsr.goal_id = s.goal_id
            JOIN workflow_runs wr ON wr.id = wsr.workflow_run_id
@@ -189,9 +230,12 @@ export function buildLivenessWatchdogDeps(
           started_at: string | null;
           output_seq: number;
           step_work_done: number;
+          awaiting_user: number | null;
+          open_question: number;
           activity_status: string | null;
           activity_source_kind: string | null;
           activity_updated_at: string | null;
+          tool_in_flight: number | null;
         }>;
       return rows.map((r) => ({
         sessionId: r.session_id,
@@ -200,13 +244,40 @@ export function buildLivenessWatchdogDeps(
         startedAtMs: r.started_at ? Date.parse(r.started_at) : null,
         outputSeq: r.output_seq,
         activityAtMs: r.activity_updated_at ? Date.parse(r.activity_updated_at) : null,
-        // Shares the PARK half of "parked on the human" with the step-run
-        // projection, rather than keeping a second copy of the predicate. It is
-        // deliberately the park half only: the stall clock asks whether the agent
-        // is stuck, and a chat reply awaiting the user is a different question
-        // this sensor has never claimed to answer.
-        systemTurn: !isParkedOnActivity(r.activity_status, r.activity_source_kind),
+        // THREE channels, not one. See activities/awaiting-user.ts,
+        // which says in as many words that neither source is complete and only
+        // the union is correct.
+        //
+        // This read the PARK half alone, on the reasoning that "a chat reply
+        // awaiting the user is a different question this sensor has never claimed
+        // to answer". That reasoning is wrong, and it cost a run. Every path that
+        // posts a chat reply — answer_user_directly, escalate_to_user,
+        // paraphrase_agent_message — leaves the worker legitimately idle with
+        // nothing to do until the human replies, and raises no activity row. So
+        // the sensor saw an idle worker on what it believed was Orca's turn and
+        // billed the idleness to the agent.
+        //
+        // Live consequence: the user typed "stop", the orchestrator replied in
+        // chat (awaiting_user = 1, header correctly reading WAITING ON YOU), and
+        // this sensor reaped the worker as `worker_stalled` three times in a row
+        // and then blocked the run at the rescue cap. The step-run projection and
+        // the metrics layer both read the union already; this was the one reader
+        // that did not.
+        //
+        // The open-question column is the third channel and closes a hole the other
+        // two leave. An ORCHESTRATOR-source question (the mediator's own ask_user)
+        // opens no activity row, and its `awaiting_user` flag is cleared by the very
+        // next action that does not post a chat reply — the prompt gate suppressing
+        // a duplicate ask is enough, with no user involvement at all. The question is
+        // still on screen, unanswered, and both other channels read false.
+        systemTurn: !isParkedOnHuman({
+          activityStatus: r.activity_status,
+          activitySourceKind: r.activity_source_kind,
+          chatReplyPending: (r.awaiting_user ?? 0) === 1,
+          openQuestion: r.open_question === 1,
+        }),
         stepWorkDone: r.step_work_done === 1,
+        toolInFlight: r.tool_in_flight === 1,
       }));
     },
     hasStepOutput: (stepRunId) =>

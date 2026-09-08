@@ -4681,6 +4681,90 @@ describe("OrchestratorService awaiting_user (is the step parked on the human?)",
     expect(awaitingUser(db)).toBe(1);
   });
 
+  it("does NOT park on the human for a chat reply while the worker's turn is still open", async () => {
+    // "The orchestrator replied" and "the human owes the next move" are the same
+    // fact only after a worker turn ends. A user can type at any moment, including
+    // mid-turn, and answering them does not make the agent stop. Parking here named
+    // the reader as the bottleneck over an agent that was not waiting on them —
+    // inflating parked time in the metrics and putting "waiting on you" over live
+    // work.
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    // A live activity at `active` is the worker mid-turn; turn_completed settles it.
+    db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence, pending_question,
+         created_at, updated_at, completed_at)
+       VALUES ('act-live', 'goal-1', 'run-1', 'step-1', NULL, 0, 'active', 'Running the tests...', NULL,
+               'tool_use', NULL, NULL, NULL, ?, ?, NULL)`
+    ).run(NOW, NOW);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "answer_user_directly", body: "It's about halfway through the suite." }),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onUserMessage(
+      db, () => NOW, { goalId: "goal-1", body: "how's it going?" }, { bus, idFactory }
+    );
+
+    expect(awaitingUser(db)).toBe(0);
+  });
+
+  it("DOES park on the human for the same reply once the worker's turn has settled", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    // Same shape as above but the turn is over (completed, not active), which is
+    // what turn_completed leaves behind.
+    db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence, pending_question,
+         created_at, updated_at, completed_at)
+       VALUES ('act-done', 'goal-1', 'run-1', 'step-1', NULL, 0, 'completed', '', 'Ran the tests.',
+               'tool_use', NULL, NULL, NULL, ?, ?, ?)`
+    ).run(NOW, NOW, NOW);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "answer_user_directly", body: "All green." }),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onUserMessage(
+      db, () => NOW, { goalId: "goal-1", body: "how's it going?" }, { bus, idFactory }
+    );
+
+    expect(awaitingUser(db)).toBe(1);
+  });
+
+  it("still parks a step whose park is a CARD, not a chat reply (no regression on the 39-hour bug)", async () => {
+    // The failure this flag was added for: a run parked on a confirmation card for
+    // 39 hours while awaiting_user read 0. A paused activity is the human's turn,
+    // never the worker's, so it must not be mistaken for a live turn here.
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+    seedAgentSession(db);
+    db.prepare(
+      `INSERT INTO activities (id, goal_id, workflow_run_id, step_run_id, agent_session_id, turn_ordinal,
+         status, current_text, final_summary, source_kind, work_category, confidence, pending_question,
+         created_at, updated_at, completed_at)
+       VALUES ('act-park', 'goal-1', 'run-1', 'step-1', NULL, 0, 'paused_for_input', 'Confirm?', NULL,
+               'step_confirmation_pending', NULL, NULL, NULL, ?, ?, NULL)`
+    ).run(NOW, NOW);
+    const service = makeJudgeService(
+      fakeMediator({ kind: "answer_user_directly", body: "Here's what that step did." }),
+      vi.fn(async () => "delivered" as const)
+    );
+
+    await service.onUserMessage(
+      db, () => NOW, { goalId: "goal-1", body: "what did it do?" }, { bus, idFactory }
+    );
+
+    expect(awaitingUser(db)).toBe(1);
+  });
+
   it("clears awaiting_user when the orchestrator drives the agent instead of replying (revise)", async () => {
     const { db, bus, idFactory } = setupHarness();
     setupAgentStepRun(db, { guardrailsJson: "[]" });

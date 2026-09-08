@@ -10,6 +10,7 @@ export interface GoalCommandRouteDeps {
   bus: EventBus;
   now?: () => string;
   idFactory?: () => string;
+  workerTerminate?: (sessionId: string) => Promise<void>;
 }
 
 function apiError(code: string, message: string): { error: { code: string; message: string } } {
@@ -26,7 +27,13 @@ export function registerGoalCommandRoutes(server: FastifyInstance, deps: GoalCom
     }
     try {
       const response = await runGoalCommand(
-        { db: deps.db, bus: deps.bus, now: deps.now ?? (() => new Date().toISOString()), idFactory: deps.idFactory },
+        {
+          db: deps.db,
+          bus: deps.bus,
+          now: deps.now ?? (() => new Date().toISOString()),
+          idFactory: deps.idFactory,
+          workerTerminate: deps.workerTerminate,
+        },
         goalId,
         parsed.data
       );

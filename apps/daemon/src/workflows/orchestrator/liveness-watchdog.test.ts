@@ -186,6 +186,9 @@ function sessionStatus(db: Database.Database, sessionId: string): string {
 }
 
 const STALL_MS = 600_000;
+// A tool call in flight earns the longer budget; well clear of STALL_MS so the
+// two thresholds are distinguishable in the assertions below.
+const TOOL_STALL_MS = STALL_MS * 4;
 const T0 = Date.parse(NOW);
 
 /** A tick clock: NOW + `offsetMs`, in the ISO form buildLivenessWatchdogDeps expects. */
@@ -204,6 +207,45 @@ function seedActivity(
        created_at, updated_at, completed_at)
      VALUES ('act-1', ?, ?, ?, NULL, 0, ?, 'working', NULL, ?, NULL, NULL, NULL, ?, ?, NULL)`
   ).run(opts.goalId, opts.runId, opts.stepRunId, opts.status, opts.sourceKind, NOW, opts.updatedAt);
+}
+
+/** An unanswered question parked on a chat message — the channel with no activity row. */
+function seedOpenQuestion(
+  db: Database.Database,
+  opts: { goalId: string; stepRunId: string; source: "worker" | "orchestrator" }
+): void {
+  db.prepare(
+    `INSERT INTO orchestrator_messages (id, goal_id, role, kind, body, correlation_id, created_at, pending_question)
+     VALUES ('om-q1', ?, 'orchestrator', 'message', 'A decision is needed.', NULL, ?, ?)`
+  ).run(
+    opts.goalId,
+    NOW,
+    JSON.stringify({
+      questionId: "q-1",
+      toolUseId: "tu-1",
+      source: opts.source,
+      stepRunId: opts.stepRunId,
+      questions: [
+        { header: "Approach", question: "Which way?", multiSelect: false, options: [{ label: "A", description: "a" }] },
+      ],
+    })
+  );
+}
+
+function answerOpenQuestion(db: Database.Database): void {
+  db.prepare(
+    `UPDATE orchestrator_messages
+        SET pending_question = json_set(pending_question, '$.answer', json('{"freeText":"A"}'))
+      WHERE id = 'om-q1'`
+  ).run();
+}
+
+/** A tool call on the live activity: `active` until its tool_result closes it. */
+function seedToolStep(db: Database.Database, opts: { status: "active" | "done" }): void {
+  db.prepare(
+    `INSERT INTO activity_steps (id, activity_id, ordinal, text, category, status, diff, created_at, tool_use_id)
+     VALUES ('astep-1', 'act-1', 0, 'Ran tests: pnpm build', 'testing', ?, NULL, ?, 'tool-1')`
+  ).run(opts.status, NOW);
 }
 
 function setOutputSeq(db: Database.Database, sessionId: string, seq: number): void {
@@ -232,6 +274,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
@@ -264,6 +307,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
@@ -293,6 +337,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
@@ -316,6 +361,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
@@ -344,6 +390,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
@@ -372,6 +419,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
@@ -398,6 +446,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
@@ -444,6 +493,7 @@ describe("livenessWatchdogTick", () => {
       now: () => NOW,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress: new Map<string, ProgressMark>(),
     });
 
@@ -476,6 +526,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
       now: () => clock,
       graceMs: GRACE_MS,
       stallMs: STALL_MS,
+      toolStallMs: TOOL_STALL_MS,
       progress,
     });
 
@@ -505,7 +556,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
     const deps = buildLivenessWatchdogDeps(db, bus, {
-      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
     });
 
     await livenessWatchdogTick(deps);
@@ -527,7 +578,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
     const deps = buildLivenessWatchdogDeps(db, bus, {
-      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
     });
 
     await livenessWatchdogTick(deps);
@@ -549,7 +600,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
     const deps = buildLivenessWatchdogDeps(db, bus, {
-      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
     });
 
     await livenessWatchdogTick(deps);
@@ -557,6 +608,196 @@ describe("livenessWatchdogTick — stall sensor", () => {
     await livenessWatchdogTick(deps);
 
     expect(sessionStatus(db, sessionId)).toBe("running");
+  });
+
+  it("gives a worker inside an unfinished tool call the longer budget", async () => {
+    // A cold install, a big build, a slow fetch: no PTY output and no activity
+    // update for as long as the tool runs, which is indistinguishable from a hang
+    // unless you look at whether a tool is actually in flight. Reaping here kills
+    // real work AND spends a rescue from the budget that ends in a blocked run.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedRunningWorkerStep(db);
+    makeServiceWithSubscriber(db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" })));
+    seedActivity(db, { goalId, runId, stepRunId, status: "active", sourceKind: "tool_use", updatedAt: NOW });
+    seedToolStep(db, { status: "active" });
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    // Well past the ordinary budget — and still working.
+    clock = atOffset(STALL_MS + 1);
+    await livenessWatchdogTick(deps);
+
+    expect(sessionStatus(db, sessionId)).toBe("running");
+  });
+
+  it("still reaps a tool that never returns, once its own budget runs out", async () => {
+    // The in-flight flag buys time, it does not buy an exemption: a tool that
+    // truly hangs has to reach a human eventually.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedRunningWorkerStep(db);
+    const { completions } = makeServiceWithSubscriber(
+      db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" }))
+    );
+    seedActivity(db, { goalId, runId, stepRunId, status: "active", sourceKind: "tool_use", updatedAt: NOW });
+    seedToolStep(db, { status: "active" });
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    clock = atOffset(TOOL_STALL_MS + 1);
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(sessionStatus(db, sessionId)).toBe("failed");
+  });
+
+  it("keeps the ordinary budget once the tool has returned", async () => {
+    // A closed tool step means the agent, not the tool, owes the next move.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, runId, stepRunId } = seedRunningWorkerStep(db);
+    const { completions } = makeServiceWithSubscriber(
+      db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" }))
+    );
+    seedActivity(db, { goalId, runId, stepRunId, status: "active", sourceKind: "tool_use", updatedAt: NOW });
+    seedToolStep(db, { status: "done" });
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS + 1);
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(sessionStatus(db, sessionId)).toBe("failed");
+  });
+
+  it("never reaps a worker idle behind an unanswered CHAT REPLY (no activity row at all)", async () => {
+    // The failure this pins. `answer_user_directly` / `escalate_to_user` /
+    // `paraphrase_agent_message` post a chat message and stop; they raise NO
+    // activity row, and record the park only on workflow_step_runs.awaiting_user.
+    // Reading the park half alone, this sensor saw an idle worker on what it
+    // believed was Orca's turn: live, it reaped a worker three times over a run
+    // whose header correctly read WAITING ON YOU, and blocked the run at the cap.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, stepRunId } = seedRunningWorkerStep(db);
+    makeServiceWithSubscriber(db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" })));
+    db.prepare("UPDATE workflow_step_runs SET awaiting_user = 1 WHERE id = ?").run(stepRunId);
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS * 100);
+    await livenessWatchdogTick(deps);
+
+    expect(sessionStatus(db, sessionId)).toBe("running");
+    expect(
+      (db.prepare("SELECT stall_rescues AS c FROM workflow_step_runs WHERE id = ?").get(stepRunId) as { c: number }).c
+    ).toBe(0);
+  });
+
+  it("re-arms the stall clock once the user answers and the chat-reply park clears", async () => {
+    // The other side of the same coin: honouring the park must not disarm the
+    // sensor permanently, or a worker that really does hang after the user
+    // replies would sit there forever.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, stepRunId } = seedRunningWorkerStep(db);
+    const { completions } = makeServiceWithSubscriber(
+      db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" }))
+    );
+    db.prepare("UPDATE workflow_step_runs SET awaiting_user = 1 WHERE id = ?").run(stepRunId);
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS * 100);
+    await livenessWatchdogTick(deps);
+    expect(sessionStatus(db, sessionId)).toBe("running");
+
+    // User answers: the park clears and it is Orca's turn again.
+    db.prepare("UPDATE workflow_step_runs SET awaiting_user = 0 WHERE id = ?").run(stepRunId);
+    clock = atOffset(STALL_MS * 101);
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS * 102 + 1);
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(sessionStatus(db, sessionId)).toBe("failed");
+  });
+
+  it("never reaps while an ORCHESTRATOR question is open, even with awaiting_user cleared", async () => {
+    // The third channel, and the one the other two miss. The mediator's own
+    // ask_user opens NO activity row, and its awaiting_user flag is cleared by the
+    // next action that posts no chat reply — the prompt gate suppressing a
+    // duplicate ask does it, with no user involvement. The question is still on
+    // screen and unanswered while both other halves read false.
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, stepRunId } = seedRunningWorkerStep(db);
+    makeServiceWithSubscriber(db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" })));
+    db.prepare("UPDATE workflow_step_runs SET awaiting_user = 0 WHERE id = ?").run(stepRunId);
+    seedOpenQuestion(db, { goalId, stepRunId, source: "orchestrator" });
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS * 100);
+    await livenessWatchdogTick(deps);
+
+    expect(sessionStatus(db, sessionId)).toBe("running");
+  });
+
+  it("reaps again once that question is answered", async () => {
+    const { db, bus, idFactory } = setupHarness();
+    const { sessionId, goalId, stepRunId } = seedRunningWorkerStep(db);
+    const { completions } = makeServiceWithSubscriber(
+      db, bus, idFactory, vi.fn(async () => ({ sessionId: "respawn-1" }))
+    );
+    db.prepare("UPDATE workflow_step_runs SET awaiting_user = 0 WHERE id = ?").run(stepRunId);
+    seedOpenQuestion(db, { goalId, stepRunId, source: "orchestrator" });
+
+    const progress = new Map<string, ProgressMark>();
+    let clock = NOW;
+    const deps = buildLivenessWatchdogDeps(db, bus, {
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
+    });
+
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS * 100);
+    await livenessWatchdogTick(deps);
+    expect(sessionStatus(db, sessionId)).toBe("running");
+
+    answerOpenQuestion(db);
+    clock = atOffset(STALL_MS * 101);
+    await livenessWatchdogTick(deps);
+    clock = atOffset(STALL_MS * 102 + 1);
+    await livenessWatchdogTick(deps);
+    await Promise.all(completions);
+
+    expect(sessionStatus(db, sessionId)).toBe("failed");
   });
 
   it("never reaps a worker awaiting permission approval, despite its active status", async () => {
@@ -570,7 +811,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
     const deps = buildLivenessWatchdogDeps(db, bus, {
-      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
     });
 
     await livenessWatchdogTick(deps);
@@ -590,7 +831,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
     const deps = buildLivenessWatchdogDeps(db, bus, {
-      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
     });
 
     await livenessWatchdogTick(deps);
@@ -625,7 +866,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
     const deps = buildLivenessWatchdogDeps(db, bus, {
-      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
     });
 
     await livenessWatchdogTick(deps);                     // system turn, clock starts
@@ -647,7 +888,7 @@ describe("livenessWatchdogTick — stall sensor", () => {
 
     const deps = buildLivenessWatchdogDeps(db, bus, {
       isTmuxAlive: async () => false, now: () => NOW, graceMs: GRACE_MS,
-      stallMs: STALL_MS, progress: new Map<string, ProgressMark>(),
+      stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress: new Map<string, ProgressMark>(),
     });
     await livenessWatchdogTick(deps);
 
@@ -678,7 +919,7 @@ describe("stall recovery accounting", () => {
     const progress = new Map<string, ProgressMark>();
     let clock = NOW;
     const deps = buildLivenessWatchdogDeps(db, bus, {
-      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, progress,
+      isTmuxAlive: async () => true, now: () => clock, graceMs: GRACE_MS, stallMs: STALL_MS, toolStallMs: TOOL_STALL_MS, progress,
     });
     await livenessWatchdogTick(deps);
     clock = atOffset(STALL_MS + 1);

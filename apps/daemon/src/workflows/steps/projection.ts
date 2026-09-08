@@ -1,7 +1,8 @@
 import type Database from "better-sqlite3";
 import {
   LIVE_ACTIVITY_COLUMNS,
-  isAwaitingUser,
+  isParkedOnHuman,
+  openQuestionColumn,
   liveActivityJoin,
 } from "../../activities/awaiting-user.js";
 import {
@@ -25,6 +26,7 @@ interface WorkflowStepRunRow {
   selected_provider_id: string | null;
   selected_model_id: string | null;
   operator_selected_at: string | null;
+  open_question: number;
   orchestrator_phase: string | null;
   pending_judge_json: string | null;
   awaiting_user: number;
@@ -33,12 +35,13 @@ interface WorkflowStepRunRow {
   step_result_json: string | null;
 }
 
-// Aliased because the live-activity join needs one. Both `awaiting_user` and the
-// live activity are selected: they cover different halves of "parked on the
-// human" (chat replies vs parks) and neither is complete alone.
+// Aliased because the live-activity join needs one. `awaiting_user`, the live
+// activity and the open-question column are all selected: they cover the three
+// different channels of "parked on the human" (chat replies, parks, unanswered
+// questions) and none is complete alone — see activities/awaiting-user.ts.
 const STEP_RUN_COLUMNS =
   "wsr.id, wsr.goal_id, wsr.workflow_run_id, wsr.step_template_id, wsr.ordinal, wsr.attempt, wsr.status, wsr.started_at, wsr.finished_at, wsr.blocked_reason, wsr.selected_operator_id, wsr.selected_provider_id, wsr.selected_model_id, wsr.operator_selected_at, wsr.orchestrator_phase, wsr.pending_judge_json, wsr.awaiting_user, wsr.step_result_json, " +
-  LIVE_ACTIVITY_COLUMNS;
+  LIVE_ACTIVITY_COLUMNS + ", " + openQuestionColumn("wsr");
 
 const STEP_RUN_FROM = `FROM workflow_step_runs wsr ${liveActivityJoin("wsr")}`;
 
@@ -82,11 +85,12 @@ function rowToStepRun(row: WorkflowStepRunRow): WorkflowStepRunT {
     operatorSelectedAt: row.operator_selected_at,
     orchestratorPhase: row.orchestrator_phase as never,
     judgePending: row.pending_judge_json != null,
-    awaitingUser: isAwaitingUser(
-      row.activity_status,
-      row.activity_source_kind,
-      row.awaiting_user === 1
-    ),
+    awaitingUser: isParkedOnHuman({
+      activityStatus: row.activity_status,
+      activitySourceKind: row.activity_source_kind,
+      chatReplyPending: row.awaiting_user === 1,
+      openQuestion: row.open_question === 1,
+    }),
     stepResult,
   });
 }

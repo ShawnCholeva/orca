@@ -15,9 +15,15 @@ type ActivityTail = "live" | "settled" | "halted";
 export function AgentActivity({
   activity,
   tail = "live",
+  showHead = true,
+  showTail = true,
 }: {
   activity: Activity;
   tail?: ActivityTail;
+  /** False on every segment but the first — the step name heads the turn once. */
+  showHead?: boolean;
+  /** False on every segment but the last — only it owns the pulse and the summary. */
+  showTail?: boolean;
 }) {
   const completed = activity.status === "completed";
   // An activity that reached a terminal status while still carrying an active
@@ -30,15 +36,27 @@ export function AgentActivity({
   // (step opened, no tool call run), fall back to a single pulse.
   const activeStep = [...activity.steps].reverse().find((s) => s.status === "active") ?? null;
   const doneSteps = activity.steps.filter((s) => s.status === "done");
-  const showInitialPulse = !stopped && activeStep === null && activity.steps.length === 0;
+  // The turn is live but between tool calls: no step is active, and the last one
+  // already earned its check. Nothing rendered here at all, because this pulse
+  // used to require `steps.length === 0` — so it only ever covered the opening
+  // gap of a turn. Every gap AFTER the first read as a finished, abandoned
+  // thread, and OrcaChat's fallback "Working on X…" row could not fill it either:
+  // that row is suppressed precisely BECAUSE this activity is active. Two guards,
+  // each assuming the other had it covered, and a dead window between them.
+  const showTrailingPulse = showTail && !stopped && activeStep === null;
   // The summary's top border is a divider from the steps thread above it. With
   // no steps rendered (a tool-less turn), that divider would float with nothing
   // above it — so drop it and sit the summary flush.
-  const hasStepsAbove = doneSteps.length > 0 || activeStep !== null || showInitialPulse;
+  const hasStepsAbove = doneSteps.length > 0 || activeStep !== null || showTrailingPulse;
+  const showSummary = showTail && completed && activity.finalSummary;
+  const headText = showHead ? activity.stepName : null;
+  // A middle segment that ended on its diff has no rows, no pulse and no summary.
+  // Rendering its bordered shell would put an empty box in the timeline.
+  if (!headText && !hasStepsAbove && !showSummary) return null;
 
   return (
     <div className="agent-activity" data-testid="agent-activity" data-status={activity.status}>
-      {activity.stepName ? <div className="agent-activity-head">{activity.stepName}</div> : null}
+      {headText ? <div className="agent-activity-head">{headText}</div> : null}
       <div className="agent-activity-steps">
         {doneSteps.map((step) => (
           <StepRow key={step.id} step={step} state="done" />
@@ -50,14 +68,18 @@ export function AgentActivity({
             state={cutShort ? "interrupted" : tail === "settled" ? "done" : "running"}
           />
         ) : null}
-        {showInitialPulse ? (
+        {showTrailingPulse ? (
           <div className="agent-activity-step" data-testid="agent-activity-active">
             <Pulse />
-            <span className="agent-activity-step-text">{activity.stepName ?? "Working…"}</span>
+            <span className="agent-activity-step-text">
+              {/* Under rows of its own the step name is already overhead; repeating
+                  it as the live line reads as a second, different thing starting. */}
+              {activity.steps.length > 0 ? "Working…" : activity.stepName ?? "Working…"}
+            </span>
           </div>
         ) : null}
       </div>
-      {completed && activity.finalSummary ? (
+      {showSummary ? (
         <div className={`agent-activity-summary${hasStepsAbove ? "" : " agent-activity-summary--flush"}`}>
           {activity.finalSummary}
         </div>

@@ -52,6 +52,7 @@ import {
 import { OrcaMark as OrcaLogo } from "../onboarding/glyphs";
 import { useTheme } from "../theme/ThemeProvider";
 import { AgentActivity, CodeChangeCard } from "./AgentActivity";
+import { splitActivityAtDiffs } from "./activity-segments";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
@@ -89,7 +90,8 @@ type ActivityState = {
 // result cards interleaved with messages in the order things actually happened.
 type TimelineEntry =
   | { kind: "message"; at: string; key: string; message: OrchestratorChatMessage }
-  | { kind: "card"; at: string; key: string; activity: Activity }
+  | { kind: "result"; at: string; key: string; activity: Activity }
+  | { kind: "card"; at: string; key: string; activity: Activity; head: boolean; tail: boolean }
   | { kind: "diff"; at: string; key: string; diff: ActivityDiff; caption: string };
 
 const EMPTY_WORKFLOW_STATE: WorkflowState = {
@@ -524,10 +526,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // timeout) and stashed the output awaiting a retry. The step is still `active`
   // but stalled on the human — never claim it is "working".
   const judgePending = workflowState.stepRun?.judgePending === true;
-  // The agent finished its turn and the orchestrator answered in chat rather than
-  // driving it onward: the step is `active` but the next move is the USER's. An
-  // idle agent is not a working one — this is the difference between "no activity
-  // yet" (worth a filler row) and "waiting on you" (never claim work).
+  // Is the human owed the next move? The daemon's single complete answer, across
+  // all three channels (an open card, a chat reply the orchestrator stopped on,
+  // an unanswered question from either source). The step can be `active` while
+  // every one of those is true. An idle agent is not a working one — this is the
+  // difference between "no activity yet" (worth a filler row) and "waiting on
+  // you" (never claim work).
   const awaitingUser = workflowState.stepRun?.awaitingUser === true;
   // "Starting workflow" is a first-moment-of-the-run affordance, so gate it on the
   // run's FIRST step (ordinal 0). Every later step's start-latency uses the generic
@@ -545,15 +549,6 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     answerPendingSince == null &&
     !hasLiveActivity &&
     !hasAgentActivityCard;
-
-  // ANY unanswered pending question (worker OR orchestrator source) means the step
-  // is parked on the human, not working — a step's AskUserQuestion can surface as
-  // "orchestrator" source (observed live), and claiming it is "working" while it
-  // waits on the user is dishonest.
-  const pendingAnyQuestionId =
-    [...messages].reverse().find(
-      (m) => m.pendingQuestion != null && m.pendingQuestion.answer == null && !m.pendingQuestion.withdrawn,
-    )?.pendingQuestion?.questionId ?? null;
 
   const pendingRevisionRunId =
     [...messages].reverse().find((m) => m.pendingRevision != null)?.pendingRevision?.workflowRunId ?? null;
@@ -722,6 +717,13 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // the agent. Surface it explicitly (with the reason) and freeze every "working"
   // affordance so the UI never shows a live spinner over work that has halted.
   const runBlocked = workflowState.run?.status === "blocked";
+  // The operator stopped the run. Same standstill as `blocked` for every live
+  // affordance — nothing is working, and a spinner over it would be a lie — but a
+  // different fact to state: one is the harness giving up, the other is the
+  // reader's own decision being honoured, and the banner must not call the second
+  // one a problem.
+  const runStopped = workflowState.run?.status === "paused";
+  const runHalted = runBlocked || runStopped;
   const blockedReason = workflowState.run?.blockedReason ?? null;
 
   // A splitter that couldn't be routed (no deterministic field, no orchestrator
@@ -751,15 +753,19 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     !hasLiveActivity &&
     !currentStepStreaming &&
     answerPendingSince == null &&
-    // Parked on an unanswered question (worker OR orchestrator source): the step
-    // ended its turn and is waiting on the human, so it is NOT working — don't
-    // claim otherwise.
-    pendingAnyQuestionId == null &&
     !judgePending &&
+    // `awaitingUser` is the daemon's complete answer to "is the human owed the
+    // next move" — a park, a chat reply, or an unanswered question from either
+    // source (activities/awaiting-user.ts, isParkedOnHuman). This used to be
+    // accompanied by a local rescan of loaded messages for an open question,
+    // because the projection only covered two of those three channels. It was a
+    // fourth private copy of a fact three other readers each had their own
+    // version of, and those copies drifting is what let the watchdog restart a
+    // run the header already showed as waiting. The projection covers it now.
     !awaitingUser &&
     !sendingMessage &&
     !awaitingReply &&
-    !runBlocked &&
+    !runHalted &&
     !showStarting;
   // Honest progress while a gate's reviewer runs. A run parked at a gate has
   // current_step_run_id = NULL, so showStepWorking (which keys off an active
@@ -775,16 +781,23 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     awaitingGate &&
     pendingGateReview == null &&
     !hasLiveActivity &&
-    !runBlocked &&
+    !runHalted &&
     !showStarting &&
     !sendingMessage &&
     !awaitingReply;
+  // Each label states only what the daemon has established. "Reviewing the step
+  // output…" is reserved for a turn that actually claimed completion; a turn that
+  // ended some other way (a question, an observation) gets a label that promises
+  // nothing about output — because the judge's next move for those is very often
+  // another question, and the old unconditional label made that read as a defect.
   const orchestratorPhaseLabel =
     orchestratorPhase === "reviewing"
       ? "Reviewing the step output…"
-      : orchestratorPhase === "independent_check"
-        ? "Running an independent check…"
-        : null;
+      : orchestratorPhase === "reading_reply"
+        ? "Reading the agent's reply…"
+        : orchestratorPhase === "independent_check"
+          ? "Running an independent check…"
+          : null;
   const showOrchestratorReview =
     orchestratorPhaseLabel != null &&
     workflowState.run?.status === "active" &&
@@ -793,7 +806,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     // activity), the review is over and awaiting the human — a stale phase must not
     // keep the "reviewing / independent check" bubble alive over the parked card.
     !hasLiveActivity &&
-    !runBlocked;
+    !runHalted;
 
   // Escape interrupts the running step agent so the user can course-correct:
   // it aborts the agent's current turn and focuses the composer. The correction
@@ -827,27 +840,42 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       key: `m:${message.id}`,
       message,
     })),
-    ...activities.filter(isTimelineCard).map((activity) => ({
-      kind: "card" as const,
-      at: activity.createdAt,
-      key: `a:${activity.id}`,
-      activity,
-    })),
-    // Code changes render as their own pre-expanded cards in the timeline rather
-    // than collapsed inside the activity card. They sort just after their source
-    // activity card (key `a:` < `d:` at the same timestamp).
-    ...activities.flatMap((activity) =>
-      (activity.steps ?? [])
-        .map((step, index) => ({ step, index }))
-        .filter(({ step }) => step.diff != null)
-        .map(({ step, index }) => ({
-          kind: "diff" as const,
-          at: activity.createdAt,
-          key: `d:${activity.id}:${String(index).padStart(4, "0")}`,
-          diff: step.diff!,
-          caption: step.text,
-        })),
-    ),
+    // A step result is one terminal card; it never splits.
+    ...activities
+      .filter((activity) => activity.sourceKind === "step_result")
+      .map((activity) => ({
+        kind: "result" as const,
+        at: activity.createdAt,
+        key: `a:${activity.id}:0000:r`,
+        activity,
+      })),
+    // Every other turn is split at its diff boundaries so the work that came
+    // after a code change renders BELOW it (see activity-segments.ts). The key
+    // carries the sequence ahead of the kind, so parts of one turn that share a
+    // timestamp still sort in the order they happened.
+    ...activities
+      .filter((activity) => activity.sourceKind !== "step_result")
+      .flatMap((activity) =>
+        splitActivityAtDiffs(activity, isAgentActivityCard(activity)).map((part) => {
+          const key = `a:${activity.id}:${String(part.seq).padStart(4, "0")}`;
+          return part.kind === "card"
+            ? {
+                kind: "card" as const,
+                at: part.at,
+                key: `${key}:c`,
+                activity: part.activity,
+                head: part.head,
+                tail: part.tail,
+              }
+            : {
+                kind: "diff" as const,
+                at: part.at,
+                key: `${key}:d`,
+                diff: part.diff,
+                caption: part.caption,
+              };
+        }),
+      ),
   ].sort((left, right) =>
     left.at === right.at
       ? left.key.localeCompare(right.key)
@@ -1173,7 +1201,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 />
               ) : entry.kind === "diff" ? (
                 <CodeChangeCard key={entry.key} diff={entry.diff} caption={entry.caption} />
-              ) : entry.activity.sourceKind === "step_result" ? (
+              ) : entry.kind === "result" ? (
                 <div key={entry.key} className="msg msg--orca">
                   <OrcaMark />
                   <div className="msg-body">
@@ -1183,16 +1211,20 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 </div>
               ) : (
                 <div key={entry.key} className="msg msg--orca">
-                  <OrcaMark />
+                  {/* Only the segment that opens a turn is attributed; the ones
+                      after a diff continue it rather than starting a new speaker. */}
+                  {entry.head ? <OrcaMark /> : <span className="msg-mark-spacer" aria-hidden />}
                   <div className="msg-body">
-                    <div className="mono msg-meta">orca</div>
+                    {entry.head ? <div className="mono msg-meta">orca</div> : null}
                     {/* During the orchestrator's post-worker review the worker's
                         turn is over, so its activity must stop pulsing — otherwise
                         two live indicators show at once. That turn ENDED though,
                         so it settles to a check; only a blocked run is halted. */}
                     <AgentActivity
                       activity={entry.activity}
-                      tail={runBlocked ? "halted" : showOrchestratorReview ? "settled" : "live"}
+                      tail={runHalted ? "halted" : showOrchestratorReview ? "settled" : "live"}
+                      showHead={entry.head}
+                      showTail={entry.tail}
                     />
                   </div>
                 </div>
@@ -1212,7 +1244,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 hint, and the orchestrator "thinking" dots all pin to the bottom
                 of the timeline so they trail the most recent activity. */}
             {liveActivity &&
-              !runBlocked &&
+              !runHalted &&
               !(liveActivity.sourceKind === "step_confirmation_pending" &&
                 pendingRevisionRunId === liveActivity.workflowRunId) && (
               <div className="msg msg--orca">
@@ -1238,7 +1270,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
               </div>
             )}
 
-            {answerPendingSince != null && !runBlocked && !showOrchestratorReview && !awaitingGate && (
+            {answerPendingSince != null && !runHalted && !showOrchestratorReview && !awaitingGate && (
               <div data-testid="answer-thinking">
                 <ThinkingRow label="Thinking…" />
               </div>
@@ -1272,7 +1304,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
                 (covers the blocking one_shot path) through the async wait for a
                 deferred reply (shadow_session / active-run, reply:null). A blocked
                 run is waiting on a human, not the agent, so never spin then. */}
-            {(sendingMessage || awaitingReply) && !runBlocked && (
+            {(sendingMessage || awaitingReply) && !runHalted && (
               <div data-testid="awaiting-reply">
                 <ThinkingRow label="Thinking…" />
               </div>
@@ -1281,7 +1313,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {/* Undecidable splitter escalated to a human routing choice: present
                 the branches (labeled by destination step) for the user to pick,
                 instead of blocking or silently defaulting. */}
-            {pendingSplitChoice && !runBlocked && (
+            {pendingSplitChoice && !runHalted && (
               <div className="orca-chat-split-choice" role="group" data-testid="split-choice">
                 <span className="orca-chat-split-choice-title">{pendingSplitChoice.prompt}</span>
                 <div className="orca-chat-split-choice-options">
@@ -1302,11 +1334,19 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             {/* Honest, inspectable terminal state: the run halted and is waiting
                 on a human. Show it plainly with the reason instead of leaving a
                 spinner running over work that has stopped. */}
-            {runBlocked && (
-              <div className="orca-chat-blocked" role="alert" data-testid="run-blocked">
-                <span className="orca-chat-blocked-title">Run blocked — needs your attention</span>
+            {runHalted && (
+              <div
+                className={`orca-chat-blocked${runStopped ? " orca-chat-blocked--stopped" : ""}`}
+                role="status"
+                data-testid={runStopped ? "run-stopped" : "run-blocked"}
+              >
+                <span className="orca-chat-blocked-title">
+                  {runStopped ? "Stopped — waiting on you" : "Run blocked — needs your attention"}
+                </span>
                 <p className="orca-chat-blocked-reason">
-                  {blockedReason ?? "The workflow stopped and could not continue automatically."}
+                  {runStopped
+                    ? "You stopped this run. The agent is shut down and nothing further will start."
+                    : blockedReason ?? "The workflow stopped and could not continue automatically."}
                 </p>
                 <button
                   type="button"

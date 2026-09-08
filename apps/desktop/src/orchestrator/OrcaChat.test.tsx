@@ -556,6 +556,17 @@ describe("OrcaChat", () => {
     setupRunLoad(); // active mid-run step "Build It", no live activity
     // The worker asked a question and ended its turn — the step is parked
     // waiting on the human, so the status must NOT claim it is working.
+    // The daemon reports this park itself: an unanswered question is one of the
+    // three channels `isParkedOnHuman` covers, so the step run comes back with
+    // awaitingUser true. The UI used to rescan loaded messages for the question
+    // instead — a private fourth copy of a fact the server already owned.
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, awaitingUser: true,
+      },
+    });
     listOrchestratorMessagesMock.mockResolvedValue({
       messages: [
         {
@@ -592,6 +603,17 @@ describe("OrcaChat", () => {
     // A step's AskUserQuestion can surface with source "orchestrator" (observed
     // live). The step is just as parked-on-the-human as a worker-source question,
     // so the "Working on {step}…" status must be suppressed for it as well.
+    // The daemon reports this park itself: an unanswered question is one of the
+    // three channels `isParkedOnHuman` covers, so the step run comes back with
+    // awaitingUser true. The UI used to rescan loaded messages for the question
+    // instead — a private fourth copy of a fact the server already owned.
+    getWorkflowStepRunMock.mockResolvedValue({
+      stepRun: {
+        id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+        ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null,
+        blockedReason: null, awaitingUser: true,
+      },
+    });
     listOrchestratorMessagesMock.mockResolvedValue({
       messages: [
         {
@@ -2875,6 +2897,48 @@ describe("ChatMessageRow worker questions", () => {
     status: "active",
     currentText: "Working…",
     steps: steps.map((s) => ({ ...s, createdAt: now, category: "reading" as const })),
+  });
+
+  it("renders the work that came after a diff BELOW that diff, not above it", async () => {
+    // The regression: every diff was timestamped with the TURN's start, so the
+    // timeline read [whole card] → [all its diffs] and the rest of the turn kept
+    // streaming into a card the reader had already scrolled past. The run looked
+    // stuck while it was still going.
+    getGoalDetailMock.mockResolvedValue({ goal, refinement: null, workspaces: [] });
+    listOrchestratorMessagesMock.mockResolvedValue({ messages: [] });
+    openEventStreamMock.mockReturnValue({ close: vi.fn() });
+    listActivitiesMock.mockResolvedValue([
+      {
+        ...activeActivity,
+        id: "stream-card",
+        status: "active",
+        steps: [
+          { id: "s1", text: "Read file A", status: "done", category: "reading", createdAt: "2026-06-16T00:00:01.000Z" },
+          {
+            id: "s2", text: "Edited .gitignore", status: "done", category: "editing",
+            createdAt: "2026-06-16T00:00:02.000Z",
+            diff: {
+              filePath: ".gitignore", additions: 1, deletions: 0,
+              hunks: [{ oldStart: null, newStart: null, lines: [{ kind: "add" as const, text: "dist" }] }],
+            },
+          },
+          { id: "s3", text: "Ran the test suite", status: "done", category: "testing", createdAt: "2026-06-16T00:00:03.000Z" },
+        ],
+      },
+    ]);
+
+    const { OrcaChat } = await import("./OrcaChat");
+    const { container } = render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+    const after = await screen.findByText("Ran the test suite");
+    const diffCard = container.querySelector('[data-testid="code-change-card"]')!;
+    expect(diffCard).toBeTruthy();
+    expect(diffCard.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // ...and the row that produced the diff stays above it, narrating the change.
+    const before = [...container.querySelectorAll(".agent-activity-step-text")].find(
+      (el) => el.textContent === "Edited .gitignore",
+    )!;
+    expect(diffCard.compareDocumentPosition(before) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 
   it("follows streaming activity steps to the bottom while pinned", async () => {

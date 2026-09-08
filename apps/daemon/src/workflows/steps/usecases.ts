@@ -117,7 +117,13 @@ function terminalStepResult(
   row: WorkflowStepRunRow,
   terminalStatus: "passed" | "blocked" | "failed" | "skipped",
   finishedAt: string,
-  supplied?: WorkflowStepResult
+  supplied?: WorkflowStepResult,
+  /**
+   * Why the step ended, when the caller knows. `markStepBlocked` does — it is
+   * handed the reason — but it writes `blocked_reason` AFTER building this
+   * result, so the row cannot supply it and the value has to come in by hand.
+   */
+  cause?: string
 ): WorkflowStepResult {
   const expectedStatus = mapStepRunStatusToResultStatus(terminalStatus);
   if (supplied) {
@@ -143,7 +149,12 @@ function terminalStepResult(
     producedArtifactsCount: artifactCountForStep(db, row.id),
     blockingIssuesCount: terminalIssueCount(terminalStatus),
     warningsCount: 0,
-    reason: "orchestrator scoring not supplied",
+    // The caller's reason when there is one. "orchestrator scoring not supplied"
+    // is an accurate description of the HARNESS's internal state — no score was
+    // handed over — and a useless one for a reader, who needs to know why the step
+    // ended. It used to be buried in a drawer labelled "Scores"; it is now on the
+    // face of the result card, so the jargon had an audience it never had before.
+    reason: cause ?? "orchestrator scoring not supplied",
   });
 }
 
@@ -444,7 +455,7 @@ export function markStepBlocked(
     }
     const timestamp = now();
     const raw = readStepRow(db, stepRunId);
-    const result = terminalStepResult(db, raw, "blocked", timestamp);
+    const result = terminalStepResult(db, raw, "blocked", timestamp, undefined, reason);
     db.prepare(
       "UPDATE workflow_step_runs SET status = 'blocked', blocked_reason = ?, blocked_code = ?, finished_at = ?, step_result_json = ? WHERE id = ?"
     ).run(sanitizeReason(reason), code, timestamp, serializeStepResult(result), stepRunId);

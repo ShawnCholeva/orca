@@ -311,15 +311,50 @@ export function ConfirmationCard({
   );
 }
 
+/**
+ * What to lead an unscored step-result card with.
+ *
+ * The card used to print the literal string "Evaluation failed" and hide
+ * `outcome.reason` behind a caret labelled "Scores" — over a self-assessment that
+ * is all zeros for exactly these results, because nothing scored them. So a step
+ * the daemon stopped after three restarts announced itself with the least
+ * informative field on the record while the useful one ("no progress after 3
+ * restarts") sat two clicks away under a misleading label.
+ *
+ * `stepStatus` already says which of these happened; say that, and put the reason
+ * on the face of the card.
+ */
+const UNSCORED_HEADLINE: Record<string, string> = {
+  blocked: "Orca stopped this step before it finished.",
+  failed: "This step failed before it produced a result.",
+  cancelled: "This step was cancelled.",
+  completed: "This step finished, but Orca couldn't check the result.",
+};
+
+/**
+ * `outcome.reason` is prefixed by the builder that wrote it
+ * (`buildEvaluationFailedStepResult`). The prefix restates the card's own state
+ * and reads as internals; the clause after it is the actual cause.
+ */
+function unscoredReason(reason: string): string {
+  const stripped = reason.replace(/^step result evaluation failed:\s*/i, "").trim();
+  if (stripped.length === 0) return reason;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
+
 export function StepResultCard({ activity }: { activity: Activity }) {
   const [open, setOpen] = useState(false);
   const r = activity.stepResult;
   if (!r) return null;
   const scored = r.evaluationStatus === "scored";
-  // For a failed evaluation, outcome.reason is an internal diagnostic string, so
-  // lead with a short label and keep the raw reason in the drawer.
-  const headline = r.resultSummary ?? (scored ? r.outcome.reason : "Evaluation failed");
-  const reasonInDrawer = r.resultSummary != null || !scored;
+  const headline =
+    r.resultSummary ??
+    (scored
+      ? r.outcome.reason
+      : UNSCORED_HEADLINE[r.stepStatus] ?? "Orca couldn't check this step's result.");
+  // Scored: the reason IS the headline, so the drawer repeats it only when a
+  // summary displaced it. Unscored: the reason is now on the card's face.
+  const reasonInDrawer = scored && r.resultSummary != null;
   const frame = activity.confirmationSummary;
   // A step confirmed via the supervised checkpoint persists with its frame. Render
   // it identically to the live confirmation card (same ConfirmationCard), only
@@ -349,6 +384,11 @@ export function StepResultCard({ activity }: { activity: Activity }) {
         <span className="step-result-name">{activity.stepName ?? "Step"}</span>
       </div>
       <div className="step-result-summary" data-testid="step-result-summary">{headline}</div>
+      {!scored ? (
+        <div className="step-result-cause" data-testid="step-result-cause">
+          {unscoredReason(r.outcome.reason)}
+        </div>
+      ) : null}
       {r.primaryArtifact ? (
         <button
           type="button"
@@ -368,7 +408,10 @@ export function StepResultCard({ activity }: { activity: Activity }) {
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
         >
-          <span>Scores</span>
+          {/* Nothing scored an unscored result, so its all-zero quality block is
+              not a score — offering it as one invites the reader to read 0% as a
+              judgement about the work. */}
+          <span>{scored ? "Scores" : "Details"}</span>
           <svg
             className="step-confirm-scores-caret"
             width="11"
@@ -388,7 +431,7 @@ export function StepResultCard({ activity }: { activity: Activity }) {
       {open ? (
         <div className="step-result-details">
           <div className="step-result-state">
-            {r.stepStatus}{scored ? ` · ${pct(r.successScore)} · ${r.outcome.handoffReady ? "Ready for handoff" : "Not ready"}` : " · Evaluation failed"}
+            {r.stepStatus}{scored ? ` · ${pct(r.successScore)} · ${r.outcome.handoffReady ? "Ready for handoff" : "Not ready"}` : " · never scored"}
           </div>
           {reasonInDrawer ? <div className="step-result-reason">{r.outcome.reason}</div> : null}
           <div className="step-result-counts">

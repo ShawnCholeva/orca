@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   augmentInstructionsWithOutputConvention,
+  claimsStepComplete,
   extractOrcaStepCompleteBlock,
   parseOrcaOutputBlock,
   parseStepCompletionEnvelope,
@@ -74,5 +75,23 @@ describe("parseStepCompletionEnvelope", () => {
   it("treats { output } with no ledger_updates as empty updates", () => {
     const r = parseStepCompletionEnvelope({ output: { a: 1 } });
     expect(r.ledgerUpdates).toEqual([]);
+  });
+});
+
+describe("claimsStepComplete", () => {
+  it("is true for a response that emitted a completion block", () => {
+    expect(claimsStepComplete('done\n```orca:step-complete\n{"a":1}\n```\n')).toBe(true);
+  });
+
+  it("is true even when the block's JSON is malformed — a bad claim is still a claim", () => {
+    expect(claimsStepComplete("```orca:step-complete\n{not json\n```")).toBe(true);
+  });
+
+  it("is false for a turn that ended with a question rather than output", () => {
+    expect(claimsStepComplete("How many days per week can Colton run, and who decides?")).toBe(false);
+  });
+
+  it("is false for a turn that merely mentions the convention in prose", () => {
+    expect(claimsStepComplete("I will emit orca:step-complete once the tests pass.")).toBe(false);
   });
 });

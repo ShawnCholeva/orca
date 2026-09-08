@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatRevisionForWorker, incrementReviseAttempt, REVISE_CAP } from "./revise-loop.js";
+import {
+  formatRevisionForWorker,
+  incrementReviseAttempt,
+  REVISE_CAP,
+  summarizeEscalationFeedback,
+} from "./revise-loop.js";
 
 describe("formatRevisionForWorker", () => {
   // Live incident (2026-07-29): the user's revision text was delivered to the
@@ -35,5 +40,36 @@ describe("revise loop counter", () => {
 
   it("third attempt reaches cap", () => {
     expect(incrementReviseAttempt(2).capReached).toBe(true);
+  });
+});
+
+describe("summarizeEscalationFeedback", () => {
+  it("passes short prose through untouched", () => {
+    const feedback = "The plan step never named a persistence host. Pick one and re-emit.";
+    expect(summarizeEscalationFeedback(feedback)).toBe(feedback);
+  });
+
+  it("keeps the lead that names the failing check and drops the log payload", () => {
+    const log = Array.from({ length: 40 }, (_, i) => `@creator-desk/api:test:  ${i}| expect(before.json())`).join("\n");
+    const out = summarizeEscalationFeedback(
+      `Required verification did not pass. Fix these and re-run, then re-emit completion:\n- unit (\`npm run test\`): ${log}`
+    );
+    expect(out).toContain("Required verification did not pass");
+    expect(out).toContain("unit (`npm run test`)");
+    expect(out).toContain("(Shortened. The agent was given the full detail.)");
+    // The screenful of runner output is what made this unreadable in the chat.
+    expect(out.length).toBeLessThan(600);
+  });
+
+  it("never ends an excerpt mid-word", () => {
+    const out = summarizeEscalationFeedback("word ".repeat(400));
+    const excerpt = out.split("…")[0];
+    expect(excerpt.endsWith("word")).toBe(true);
+  });
+
+  it("cuts hard when there is no break to cut on", () => {
+    const out = summarizeEscalationFeedback("x".repeat(2000));
+    expect(out.length).toBeLessThan(600);
+    expect(out).toContain("(Shortened. The agent was given the full detail.)");
   });
 });

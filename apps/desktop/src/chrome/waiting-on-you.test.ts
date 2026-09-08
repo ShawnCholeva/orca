@@ -13,7 +13,7 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
     blockedReason: null, terminationCause: "running", terminationEvidence: null,
     durations: {
       elapsedMs: 39 * HOUR, workingMs: HOUR, parkedMs: 38 * HOUR,
-      unaccountedMs: 0, spanActiveMs: 0, accruing: true, integrityFlag: null,
+      unaccountedMs: 0, agentMs: 0, haltedMs: 0, reviewingMs: 0, spanActiveMs: 0, accruing: true, integrityFlag: null,
     },
     cost: {
       usd: 1.6, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
@@ -26,6 +26,7 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
       lastSignalAt: null, lastSignalChannel: null, silenceConclusive: true,
     },
     awaitingYou: { count: 0, sinceMs: null, sourceKind: null },
+    stopCompliance: { requested: 0, lastRequestedAt: null, honored: null, violationEvidence: null },
     ...over,
   };
 }
