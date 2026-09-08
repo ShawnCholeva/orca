@@ -192,6 +192,7 @@ describe("runMigrations", () => {
       "0064_step_run_stall_rescues.sql",
       "0065_step_run_awaiting_user.sql",
       "0066_step_run_blocked_code.sql",
+      "0067_model_catalog_cache.sql",
     ]);
   });
 
@@ -350,6 +351,7 @@ describe("runMigrations", () => {
       "0064_step_run_stall_rescues.sql",
       "0065_step_run_awaiting_user.sql",
       "0066_step_run_blocked_code.sql",
+      "0067_model_catalog_cache.sql",
     ]);
 
     const goalCount = (
@@ -661,6 +663,7 @@ describe("session tables migration", () => {
       "0064_step_run_stall_rescues.sql",
       "0065_step_run_awaiting_user.sql",
       "0066_step_run_blocked_code.sql",
+      "0067_model_catalog_cache.sql",
     ]);
 
     const tables = (
@@ -1205,6 +1208,7 @@ describe("migration 0010 workflows", () => {
       "0064_step_run_stall_rescues.sql",
       "0065_step_run_awaiting_user.sql",
       "0066_step_run_blocked_code.sql",
+      "0067_model_catalog_cache.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1826,6 +1830,7 @@ describe("migration 0012 orchestration transport", () => {
       "0064_step_run_stall_rescues.sql",
       "0065_step_run_awaiting_user.sql",
       "0066_step_run_blocked_code.sql",
+      "0067_model_catalog_cache.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
