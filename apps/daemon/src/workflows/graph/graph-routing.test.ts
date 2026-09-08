@@ -10,10 +10,10 @@ import {
 } from "./graph-routing.js";
 
 const steps: WorkflowStepTemplate[] = [
-  { id: "analysis", ordinal: 0, name: "Analysis", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "m" }] },
-  { id: "execution", ordinal: 1, name: "Execution", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "m" }] },
-  { id: "validation", ordinal: 2, name: "Validation", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "m" }] },
-  { id: "done", ordinal: 3, name: "Done", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "m" }] },
+  { id: "analysis", ordinal: 0, name: "Analysis", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "m", contextVariant: "default", effort: null }] },
+  { id: "execution", ordinal: 1, name: "Execution", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "m", contextVariant: "default", effort: null }] },
+  { id: "validation", ordinal: 2, name: "Validation", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "m", contextVariant: "default", effort: null }] },
+  { id: "done", ordinal: 3, name: "Done", instructions: "x", outputSchema: [{ key: "s", type: "string", required: true }], agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "m", contextVariant: "default", effort: null }] },
 ];
 
 const featureGraph: WorkflowGraph = {

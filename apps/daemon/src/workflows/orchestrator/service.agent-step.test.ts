@@ -20,6 +20,7 @@ import { ProviderRecoveryController } from "./provider-recovery-controller.js";
 import type { RunnerPort } from "./runner-port.js";
 import {
   cleanupHarness,
+  fakeCatalog,
   NOW,
   seedSkillWorkflow,
   setupHarness,
@@ -28,6 +29,7 @@ import {
   fakeRegistry,
   MODEL_OPERATOR_ID,
 } from "./skill-step-test-helpers.js";
+import { SEED_PROFILES } from "../../adapters/model-catalog/profiles.js";
 import type { OrchestratorMediator } from "../../orchestrator-llm/mediator.js";
 import type { OrchestratorAction } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
@@ -324,8 +326,8 @@ function setupAgentStepRun(db: Database.Database, opts: { guardrailsJson?: strin
       instructions: "Write the implementation.",
       outputSchema: [{ key: "result", type: "string", required: true }],
       agentPreference: [
-        { adapterId: "claude-code", modelId: "claude-haiku-4-5" },
-        { adapterId: "codex", modelId: "gpt-5-codex" },
+        { kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null },
+        { kind: "pinned", adapterId: "codex", modelId: "gpt-5-codex", contextVariant: "default", effort: null },
       ],
     }),
     ...(opts.grounding ? { grounding: opts.grounding } : {}),
@@ -357,7 +359,7 @@ function setupTwoStepAgentRun(db: Database.Database) {
     name: "Implement",
     instructions: "Write the implementation.",
     outputSchema: [{ key: "result", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
   });
   const step2 = makeStep({
     id: "verify",
@@ -365,7 +367,7 @@ function setupTwoStepAgentRun(db: Database.Database) {
     name: "Verify",
     instructions: "Verify the implementation.",
     outputSchema: [{ key: "result", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
   });
 
   db.prepare(
@@ -2252,7 +2254,7 @@ function setupFirstStepRun(db: Database.Database) {
     name: "Implement",
     instructions: "Write the implementation.",
     outputSchema: [{ key: "result", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
   });
 
   db.prepare(
@@ -2281,7 +2283,7 @@ function setupTwoStepRunWithOutput(db: Database.Database) {
     name: "Plan",
     instructions: "Plan the work.",
     outputSchema: [{ key: "plan", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
   });
   const step2 = makeStep({
     id: "build",
@@ -2289,7 +2291,7 @@ function setupTwoStepRunWithOutput(db: Database.Database) {
     name: "Build",
     instructions: "Implement the plan.",
     outputSchema: [{ key: "result", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
   });
 
   db.prepare(
@@ -2400,9 +2402,13 @@ describe("OrchestratorService.startWorkflowFirstStep / advanceToNextStep", () =>
     const launchFn = vi.fn(async () => ({ sessionId: "sess-codex" }));
     const stepDispatch: StepDispatchCapabilities = {
       isAdapterReady: async (adapterId) => adapterId === "claude-code" || adapterId === "codex",
-      supportsModel: (adapterId, modelId) =>
-        (adapterId === "claude-code" && modelId === "claude-haiku-4-5") ||
-        (adapterId === "codex" && modelId === "gpt-5.4-mini"),
+      catalogFor: async (adapterId) =>
+        adapterId === "claude-code"
+          ? fakeCatalog(["claude-haiku-4-5"])
+          : adapterId === "codex"
+            ? fakeCatalog(["gpt-5.4-mini"])
+            : [],
+      profiles: SEED_PROFILES,
       resolveMode: (adapterId) => ({ adapterId, mode: "shadow_session", fallbacks: [] }),
     };
     const broker1966 = fakeBrokerNoop();
@@ -3127,11 +3133,12 @@ function makeRecoveryService(opts: {
     async isAdapterReady(id) {
       return adapterReady(id);
     },
-    supportsModel(id, mid) {
-      if (id === "claude-code" && mid === "claude-haiku-4-5") return true;
-      if (id === "codex" && mid === "gpt-5-codex") return true;
-      return false;
+    async catalogFor(id) {
+      if (id === "claude-code") return fakeCatalog(["claude-haiku-4-5"]);
+      if (id === "codex") return fakeCatalog(["gpt-5-codex"]);
+      return [];
     },
+    profiles: SEED_PROFILES,
     resolveMode(id) {
       return { adapterId: id, mode: "one_shot", fallbacks: ["shadow_session"] };
     },
@@ -3199,11 +3206,12 @@ function makeRecoveryServiceWithWait(opts: {
     async isAdapterReady(id) {
       return id === "claude-code" || id === "codex";
     },
-    supportsModel(id, mid) {
-      if (id === "claude-code" && mid === "claude-haiku-4-5") return true;
-      if (id === "codex" && mid === "gpt-5-codex") return true;
-      return false;
+    async catalogFor(id) {
+      if (id === "claude-code") return fakeCatalog(["claude-haiku-4-5"]);
+      if (id === "codex") return fakeCatalog(["gpt-5-codex"]);
+      return [];
     },
+    profiles: SEED_PROFILES,
     resolveMode(id) {
       return { adapterId: id, mode: "one_shot", fallbacks: ["shadow_session"] };
     },
@@ -3737,7 +3745,19 @@ describe("OrchestratorService provider recovery actions", () => {
     expect(ck.replacementSessionId).toBe("sess-replacement");
     expect(ck.replacementOutputSeq).toBe(4);
     expect(launch).toHaveBeenCalledTimes(1);
-    expect(spawn).toHaveBeenCalledWith({ sessionId: "sess-replacement", goalId: "goal-1", adapterId: "codex" });
+    // The respawn carries the model the step resolves to on the switched-to
+    // adapter, not the ambient CLI default.
+    expect(spawn).toHaveBeenCalledWith({
+      sessionId: "sess-replacement",
+      goalId: "goal-1",
+      adapterId: "codex",
+      model: {
+        adapterId: "codex",
+        modelId: "gpt-5-codex",
+        contextVariant: "default",
+        effort: null,
+      },
+    });
     expect(deliver).toHaveBeenCalledWith(
       "sess-replacement",
       expect.stringContaining("prefer pnpm")

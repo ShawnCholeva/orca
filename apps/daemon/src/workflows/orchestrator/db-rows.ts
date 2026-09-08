@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { ModelProviderId, StepAgentChoice } from "@orca/contracts";
+import { asPinned, type ModelProviderId, type StepAgentChoice } from "@orca/contracts";
 import { adapterIdForProvider } from "../../orchestrator-llm/model-provider-llm-client.js";
 
 export interface GoalRow {
@@ -106,9 +106,13 @@ export function preferencesForGoal(
 ): StepAgentChoice[] {
   if (!orchestratorProvider) return preferences;
   const preferredAdapterId = adapterIdForProvider(orchestratorProvider);
-  if (!preferences.some((pref) => pref.adapterId === preferredAdapterId)) return preferences;
+  // A profile arm names no adapter — its adapter is decided at dispatch — so it
+  // is never "the preferred one" and keeps its place behind any promoted pin.
+  const isPreferred = (pref: StepAgentChoice) =>
+    asPinned(pref)?.adapterId === preferredAdapterId;
+  if (!preferences.some(isPreferred)) return preferences;
   return [
-    ...preferences.filter((pref) => pref.adapterId === preferredAdapterId),
-    ...preferences.filter((pref) => pref.adapterId !== preferredAdapterId),
+    ...preferences.filter(isPreferred),
+    ...preferences.filter((pref) => !isPreferred(pref)),
   ];
 }

@@ -17,7 +17,7 @@ function makeStep(
     name: id,
     instructions: "do the thing",
     outputSchema: outputKeys.map((k) => ({ key: k, type: "string" as const, required: true })),
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-opus-4-5", contextVariant: "default", effort: null }],
   };
 }
 

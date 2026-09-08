@@ -22,9 +22,11 @@ import { listGateDecisionsForRun } from "../gates/projection.js";
 import { setSupervisionMode } from "../../settings/store.js";
 import {
   cleanupHarness,
+  fakeCatalog,
   NOW,
   setupHarness,
 } from "./skill-step-test-helpers.js";
+import { SEED_PROFILES } from "../../adapters/model-catalog/profiles.js";
 import type {
   BrokerCompatibilityOptions,
   OrchestrationTransportBroker,
@@ -94,9 +96,10 @@ function adStepDispatch(): StepDispatchCapabilities {
     async isAdapterReady(adapterId) {
       return adapterId === AD_ADAPTER;
     },
-    supportsModel(adapterId, modelId) {
-      return adapterId === AD_ADAPTER && AD_MODELS.has(modelId);
+    async catalogFor(adapterId) {
+      return adapterId === AD_ADAPTER ? fakeCatalog([...AD_MODELS]) : [];
     },
+    profiles: SEED_PROFILES,
     resolveMode(adapterId) {
       return { adapterId, mode: "one_shot", fallbacks: ["shadow_session"] };
     },

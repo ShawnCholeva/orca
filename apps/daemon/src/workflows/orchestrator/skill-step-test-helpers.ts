@@ -4,7 +4,9 @@ import path from "node:path";
 
 import type Database from "better-sqlite3";
 import type {
+  CatalogModel,
   OperatorDescriptor,
+  StepAgentChoice,
   StepSkillProposal,
 } from "@orca/contracts";
 
@@ -12,6 +14,8 @@ import type { Config } from "../../config.js";
 import { openDatabase } from "../../db.js";
 import { EventBus } from "../../events.js";
 import { defaultMigrationsDir, runMigrations } from "../../migrations.js";
+import { SEED_PROFILES } from "../../adapters/model-catalog/profiles.js";
+import { SEED_CATALOG } from "../../adapters/model-catalog/seed.js";
 import type { OperatorRegistry } from "../operators/registry.js";
 import type {
   BrokerCompatibilityOptions,
@@ -73,7 +77,7 @@ export interface SkillStep {
   name: string;
   instructions: string;
   outputSchema: Array<{ key: string; type: string; required: boolean }>;
-  agentPreference: Array<{ adapterId: string; modelId: string }>;
+  agentPreference: StepAgentChoice[];
 }
 
 export function makeStep(patch: Partial<SkillStep> = {}): SkillStep {
@@ -83,7 +87,9 @@ export function makeStep(patch: Partial<SkillStep> = {}): SkillStep {
     name: "Plan",
     instructions: "Plan the work and produce a problem statement.",
     outputSchema: [{ key: "problem", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [
+      { kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null },
+    ],
     ...patch,
   };
 }
@@ -109,7 +115,9 @@ export function seedSkillWorkflow(db: Database.Database, args: SeedWorkflowArgs 
         name: "Build",
         instructions: "Implement the plan.",
         outputSchema: [{ key: "result", type: "string", required: true }],
-        agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+        agentPreference: [
+      { kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null },
+    ],
       }),
     ];
   const current = steps[0]!;
@@ -175,14 +183,33 @@ export function fakeRegistry(): Pick<OperatorRegistry, "list"> {
   };
 }
 
+/**
+ * A minimal catalog entry per id. Dispatch only needs membership and effort
+ * support, so everything descriptive is left blank on purpose.
+ */
+export function fakeCatalog(ids: string[]): CatalogModel[] {
+  return ids.map((id) => ({
+    id,
+    family: "",
+    displayName: id,
+    contextWindow: 200_000,
+    supports1mSuffix: false,
+    pricingTier: null,
+    advisorRank: null,
+    supportedEfforts: [],
+    defaultEffort: null,
+  }));
+}
+
 export function fakeStepDispatch(): StepDispatchCapabilities {
   return {
     async isAdapterReady(adapterId) {
       return adapterId === "claude-code";
     },
-    supportsModel(adapterId, modelId) {
-      return adapterId === "claude-code" && modelId === "claude-haiku-4-5";
+    async catalogFor(adapterId) {
+      return adapterId === "claude-code" ? SEED_CATALOG["claude-code"] : [];
     },
+    profiles: SEED_PROFILES,
     resolveMode(adapterId) {
       return { adapterId, mode: "one_shot", fallbacks: ["shadow_session"] };
     },

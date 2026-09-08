@@ -143,6 +143,7 @@ describe("recordOperatorSelection", () => {
       operatorId: "agent:codex",
       providerId: null,
       modelId: null,
+      effort: null,
       at: "2026-05-27T00:00:00.000Z",
     });
 

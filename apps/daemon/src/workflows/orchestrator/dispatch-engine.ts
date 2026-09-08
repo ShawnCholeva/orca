@@ -13,6 +13,7 @@ import {
   validateStepOutput,
   type DomainEvent,
   type OperatorDescriptor,
+  type ResolvedModelChoice,
   type WorkflowDecisionTrace,
   type WorkflowRun as WorkflowRunT,
   type WorkflowGraph,
@@ -268,6 +269,15 @@ export function stepDispatchEnablesOneShot(
   }
 }
 
+/**
+ * The model string that actually ran. Not the bare catalog id: "[1m]" is part of
+ * what ran, and the OTEL cost reader distinguishes providers by this column's
+ * prefix, so the dispatch string is what belongs in `selected_model_id`.
+ */
+export function dispatchModelString(model: ResolvedModelChoice): string {
+  return model.contextVariant === "1m" ? `${model.modelId}[1m]` : model.modelId;
+}
+
 // decideGate outcome: applied, or an honest no-op reason the route can map
 // (404 run_not_found, 409 gate_evaluation_in_flight, idempotent no_pending_gate).
 export type GateDecisionResult =
@@ -280,7 +290,7 @@ export class DispatchEngine {
     private readonly operators: Pick<OperatorRegistry, "list">,
     private readonly launcher: WorkflowSessionLauncher,
     private readonly stepDispatch: StepDispatchCapabilities | undefined,
-    private readonly workerSpawn: ((input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>) | undefined,
+    private readonly workerSpawn: ((input: { sessionId: string; goalId: string; adapterId: string; model?: ResolvedModelChoice }) => Promise<void>) | undefined,
     private readonly workerDeliver: ((sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">) | undefined,
     private readonly otlpAccumulator: TokenAccumulator = NULL_ACCUMULATOR,
     private readonly shadowAsk?: ShadowAsk,
@@ -409,7 +419,8 @@ export class DispatchEngine {
     const dispatch = await resolveStepDispatch({
       preferences: preferencesForGoal(ctx.stepTpl.agentPreference, ctx.goal.orchestrator_provider),
       isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
-      supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+      catalogFor: (id) => this.stepDispatch!.catalogFor(id),
+      profiles: this.stepDispatch!.profiles,
       resolveMode: (id) => this.stepDispatch!.resolveMode(id),
     });
 
@@ -458,7 +469,7 @@ export class DispatchEngine {
       this.recordStepLaunchTransition(db, now, ctx.goal, ctx.run, ctx.stepRun, sessionId, options);
 
       // Run the agent as a headless tmux worker, then submit its objective.
-      await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId });
+      await this.workerSpawn?.({ sessionId, goalId: ctx.goal.id, adapterId: dispatch.adapterId, model: dispatch.model });
       const delivered = await this.workerDeliver?.(sessionId, objective);
       if (delivered && delivered !== "delivered") {
         postOrchestratorMessage(
@@ -543,7 +554,8 @@ export class DispatchEngine {
       const dispatch = await resolveStepDispatch({
         preferences: preferencesForGoal(stepTpl.agentPreference, goal.orchestrator_provider),
         isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
-        supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+        catalogFor: (id) => this.stepDispatch!.catalogFor(id),
+        profiles: this.stepDispatch!.profiles,
         resolveMode: (id) => this.stepDispatch!.resolveMode(id),
       }).catch(() => null);
       if (!dispatch) {
@@ -1018,7 +1030,8 @@ export class DispatchEngine {
       recordOperatorSelection(db, stepRun.id, {
         operatorId,
         providerId,
-        modelId: dispatch.modelId,
+        modelId: dispatchModelString(dispatch.model),
+        effort: dispatch.model.effort,
         at: now(),
       });
       stagedEvents.push(
@@ -2374,7 +2387,8 @@ export class DispatchEngine {
       dispatch = await resolveStepDispatch({
         preferences: preferencesForGoal(gateNode.agentPreference ?? [], goal.orchestrator_provider),
         isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
-        supportsModel: (id, mid) => this.stepDispatch!.supportsModel(id, mid),
+        catalogFor: (id) => this.stepDispatch!.catalogFor(id),
+        profiles: this.stepDispatch!.profiles,
         resolveMode: (id) => this.stepDispatch!.resolveMode(id),
       });
     } catch {
@@ -2402,7 +2416,8 @@ export class DispatchEngine {
       recordOperatorSelection(db, surrogateId, {
         operatorId: `agent:${dispatch.adapterId}`,
         providerId: dispatch.providerId ?? null,
-        modelId: dispatch.modelId,
+        modelId: dispatchModelString(dispatch.model),
+        effort: dispatch.model.effort,
         at: now(),
       });
 
@@ -2500,7 +2515,7 @@ export class DispatchEngine {
         operatorKind: "agent",
         objective,
       });
-      await this.workerSpawn?.({ sessionId, goalId: goal.id, adapterId: dispatch.adapterId });
+      await this.workerSpawn?.({ sessionId, goalId: goal.id, adapterId: dispatch.adapterId, model: dispatch.model });
       const delivered = await this.workerDeliver?.(sessionId, objective);
       if (delivered && delivered !== "delivered") {
         escalateNoDelivery(

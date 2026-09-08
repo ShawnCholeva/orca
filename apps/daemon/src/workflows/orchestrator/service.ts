@@ -70,7 +70,7 @@ import { SHADOW_LLM_TIMEOUT_MS } from "../../orchestrator-llm/shadow-llm-client.
 import type { ShadowAdapterId } from "../../orchestrator-llm/shadow-session.js";
 import { resolveAgentProvider } from "../../orchestrator-llm/providers/registry.js";
 import { listAgents } from "../../agents.js";
-import { buildProviderRecoveryChoices } from "./provider-recovery.js";
+import { buildProviderRecoveryChoices, resolveRecoveryDispatch } from "./provider-recovery.js";
 import {
   recoverStepScoring,
   type ShadowAsk,
@@ -730,14 +730,27 @@ export class OrchestratorService {
         const stepTpl = template.steps.find((s) => s.id === stepRun.step_template_id);
         if (!stepTpl) return;
         const goal = readGoal(db, run.goalId);
+        // Re-resolve against the switched-to adapter so the recorded selection
+        // carries the effort the replacement actually runs at, not just its id.
         const mode = this.stepDispatch!.resolveMode(choice.adapterId);
+        const resolved = await resolveRecoveryDispatch(
+          this.stepDispatch!,
+          preferencesForGoal(stepTpl.agentPreference, goal.orchestrator_provider),
+          choice.adapterId
+        );
         this.engine.commitDeterministicStepSelection(
           db,
           now,
           { run, stepRun, stepTpl, template, goal },
-          {
+          resolved ?? {
             adapterId: choice.adapterId,
             modelId: choice.modelId,
+            model: {
+              adapterId: choice.adapterId,
+              modelId: choice.modelId,
+              contextVariant: "default",
+              effort: null,
+            },
             executionMode: mode.mode,
             fallbackModes: mode.fallbacks,
           },
@@ -794,7 +807,7 @@ export class OrchestratorService {
         agentIds: connectedAdapterIds,
         includeNonAgents: false,
       });
-      const choices = buildProviderRecoveryChoices({
+      const choices = await buildProviderRecoveryChoices({
         currentAdapterId: sess.adapter_id,
         connectedAdapterIds,
         stepPreferences: preferencesForGoal(
@@ -802,7 +815,8 @@ export class OrchestratorService {
           goal.orchestrator_provider
         ),
         operators: operatorDescriptors,
-        supportsModel: (id, mid) => this.stepDispatch?.supportsModel(id, mid) ?? false,
+        catalogFor: (id) => this.stepDispatch?.catalogFor(id) ?? Promise.resolve([]),
+        profiles: this.stepDispatch?.profiles ?? [],
       });
 
       const newCheckpoint = ProviderRecoveryCheckpoint.parse({

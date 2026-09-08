@@ -11,6 +11,11 @@ import type { ConflictDetector } from './conflicts/detectors.js';
 import { DeterministicConflictDetector } from './conflicts/detectors.js';
 import { ReadinessService } from './readiness/service.js';
 import { adapterRegistry } from './adapters/registry.js';
+import { resolveBinary } from './adapters/resolve.js';
+import { extractClaudeCatalog } from './adapters/model-catalog/extract-claude.js';
+import { SEED_PROFILES } from './adapters/model-catalog/profiles.js';
+import { loadCatalog } from './adapters/model-catalog/store.js';
+import type { AdapterId, CatalogModel } from '@orca/contracts';
 import { ModelProviderRegistry } from './llm/registry.js';
 import { createAnthropicProvider } from './llm/anthropic.js';
 import { createOpenAIProvider } from './llm/openai.js';
@@ -45,6 +50,40 @@ export interface DaemonContext {
   idFactory: () => string;
 }
 
+/** The binary the claude-code adapter would spawn, resolved the same way it does. */
+async function claudeBinaryPath(): Promise<string | null> {
+  const override = process.env['ORCA_CLAUDE_CODE_BIN'];
+  const resolved = await resolveBinary(override ? [override] : ['claude']);
+  return 'error' in resolved ? null : resolved.resolvedPath;
+}
+
+/**
+ * The installed CLI's model lineup, extracted once per adapter version and
+ * cached in the DB. Only claude-code can be extracted today; every other adapter
+ * falls through to the checked-in seed inside loadCatalog.
+ */
+async function loadAdapterCatalog(
+  db: Database.Database,
+  adapterId: AdapterId,
+  now: () => string
+): Promise<CatalogModel[]> {
+  const adapter = adapterRegistry.get(adapterId);
+  const loaded = await loadCatalog(db, adapterId, {
+    version: async () => {
+      if (!adapter) return null;
+      const installed = await adapter.checkInstalled();
+      return installed.ok ? (installed.version ?? null) : null;
+    },
+    extract: async () => {
+      if (adapterId !== 'claude-code') return [];
+      const binary = await claudeBinaryPath();
+      return binary ? extractClaudeCatalog(binary) : [];
+    },
+    now,
+  });
+  return loaded.models;
+}
+
 function createDefaultModelProviderRegistry(): ModelProviderRegistry {
   const registry = new ModelProviderRegistry();
   registry.register(createAnthropicProvider());
@@ -69,8 +108,8 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
       const report = await readinessService.checkAgent(adapterId);
       return report.status === "ready";
     },
-    supportsModel: (adapterId, modelId) =>
-      adapterRegistry.get(adapterId)?.supportsModel(modelId) ?? false,
+    catalogFor: (adapterId) => loadAdapterCatalog(db, adapterId, now),
+    profiles: SEED_PROFILES,
     resolveMode: (adapterId) => adapterDispatcher.resolveMode(adapterId),
   };
   const orchestrationTransportBroker = new OrchestrationTransportBroker({

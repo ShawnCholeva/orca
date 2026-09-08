@@ -183,7 +183,7 @@ function step(id: string, ordinal: number): SkillStep {
     name: id,
     instructions: `Do ${id}.`,
     outputSchema: [{ key: "result", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
   });
 }
 

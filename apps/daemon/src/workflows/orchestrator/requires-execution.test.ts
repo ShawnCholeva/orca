@@ -29,7 +29,7 @@ function step(id: string, grounding?: WorkflowStepTemplate["grounding"]): Workfl
   return {
     id, ordinal: 0, name: id, instructions: "do it",
     outputSchema: [{ key: "summary", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
     ...(grounding ? { grounding } : {}),
   };
 }

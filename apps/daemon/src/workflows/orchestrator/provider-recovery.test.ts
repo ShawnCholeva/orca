@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { OperatorDescriptor, StepAgentChoice } from "@orca/contracts";
+import type { AdapterId, CatalogModel, OperatorDescriptor, StepAgentChoice } from "@orca/contracts";
 import { ORCHESTRATION_WORKER_OUTPUT_TAIL_MAX_BYTES } from "@orca/contracts";
+import { SEED_PROFILES } from "../../adapters/model-catalog/profiles.js";
 import { buildProviderRecoveryChoices, composeProviderSwitchPrompt } from "./provider-recovery.js";
 
 // Helpers to build minimal OperatorDescriptors for agents
@@ -21,14 +22,25 @@ function agent(
   };
 }
 
+const CODEX_MINI: CatalogModel = {
+  id: "gpt-5.4-mini", family: "gpt-5-mini", displayName: "GPT-5.4 mini", contextWindow: 400_000,
+  supports1mSuffix: false, pricingTier: null, advisorRank: null,
+  supportedEfforts: [], defaultEffort: null,
+};
+/** Only codex ships the step's configured model; every other adapter is empty. */
+const catalogFor = async (adapterId: AdapterId): Promise<CatalogModel[]> =>
+  adapterId === "codex" ? [CODEX_MINI] : [];
+const emptyCatalog = async (): Promise<CatalogModel[]> => [];
+const profiles = SEED_PROFILES;
+
 const DEFAULT_PREFERENCES: StepAgentChoice[] = [
-  { adapterId: "claude-code", modelId: "claude-sonnet-4-6" },
-  { adapterId: "codex", modelId: "gpt-5.4-mini" },
+  { kind: "pinned", adapterId: "claude-code", modelId: "claude-sonnet-4-6", contextVariant: "default", effort: null },
+  { kind: "pinned", adapterId: "codex", modelId: "gpt-5.4-mini", contextVariant: "default", effort: null },
 ];
 
 describe("buildProviderRecoveryChoices", () => {
   it("returns connected non-current agents with step-configured models", async () => {
-    const choices = buildProviderRecoveryChoices({
+    const choices = await buildProviderRecoveryChoices({
       currentAdapterId: "claude-code",
       connectedAdapterIds: ["claude-code", "codex", "antigravity"],
       stepPreferences: DEFAULT_PREFERENCES,
@@ -37,8 +49,8 @@ describe("buildProviderRecoveryChoices", () => {
         agent("codex", true),
         agent("antigravity", false, "authentication required"),
       ],
-      supportsModel: (adapterId, modelId) =>
-        adapterId === "codex" && modelId === "gpt-5.4-mini",
+      catalogFor,
+      profiles,
     });
 
     expect(choices).toEqual([
@@ -59,26 +71,27 @@ describe("buildProviderRecoveryChoices", () => {
     ]);
   });
 
-  it("returns empty array when only the current provider is connected", () => {
-    const choices = buildProviderRecoveryChoices({
+  it("returns empty array when only the current provider is connected", async () => {
+    const choices = await buildProviderRecoveryChoices({
       currentAdapterId: "claude-code",
       connectedAdapterIds: ["claude-code"],
       stepPreferences: DEFAULT_PREFERENCES,
       operators: [agent("claude-code", true)],
-      supportsModel: () => false,
+      catalogFor: emptyCatalog,
+      profiles,
     });
 
     expect(choices).toEqual([]);
   });
 
-  it("disables a configured but not-ready provider with its readiness reason", () => {
-    const choices = buildProviderRecoveryChoices({
+  it("disables a configured but not-ready provider with its readiness reason", async () => {
+    const choices = await buildProviderRecoveryChoices({
       currentAdapterId: "claude-code",
       connectedAdapterIds: ["claude-code", "codex"],
       stepPreferences: DEFAULT_PREFERENCES,
       operators: [agent("claude-code", true), agent("codex", false, "needs_auth")],
-      supportsModel: (adapterId, modelId) =>
-        adapterId === "codex" && modelId === "gpt-5.4-mini",
+      catalogFor,
+      profiles,
     });
 
     expect(choices).toEqual([
@@ -92,13 +105,14 @@ describe("buildProviderRecoveryChoices", () => {
     ]);
   });
 
-  it("disables a provider whose configured model is not supported", () => {
-    const choices = buildProviderRecoveryChoices({
+  it("disables a provider whose configured model is not supported", async () => {
+    const choices = await buildProviderRecoveryChoices({
       currentAdapterId: "claude-code",
       connectedAdapterIds: ["claude-code", "codex"],
       stepPreferences: DEFAULT_PREFERENCES,
       operators: [agent("claude-code", true), agent("codex", true)],
-      supportsModel: () => false,
+      catalogFor: emptyCatalog,
+      profiles,
     });
 
     expect(choices).toEqual([
@@ -112,20 +126,21 @@ describe("buildProviderRecoveryChoices", () => {
     ]);
   });
 
-  it("excludes disconnected agents even if they appear in operators", () => {
-    const choices = buildProviderRecoveryChoices({
+  it("excludes disconnected agents even if they appear in operators", async () => {
+    const choices = await buildProviderRecoveryChoices({
       currentAdapterId: "claude-code",
       connectedAdapterIds: ["claude-code"],
       stepPreferences: DEFAULT_PREFERENCES,
       operators: [agent("claude-code", true), agent("codex", true)],
-      supportsModel: () => true,
+      catalogFor,
+      profiles,
     });
 
     expect(choices).toEqual([]);
   });
 
-  it("uses 'provider unavailable' as fallback when not-ready reason is absent", () => {
-    const choices = buildProviderRecoveryChoices({
+  it("uses 'provider unavailable' as fallback when not-ready reason is absent", async () => {
+    const choices = await buildProviderRecoveryChoices({
       currentAdapterId: "claude-code",
       connectedAdapterIds: ["claude-code", "codex"],
       stepPreferences: DEFAULT_PREFERENCES,
@@ -134,8 +149,8 @@ describe("buildProviderRecoveryChoices", () => {
         // no notReadyReason
         { ...agent("codex", false), notReadyReason: undefined },
       ],
-      supportsModel: (adapterId, modelId) =>
-        adapterId === "codex" && modelId === "gpt-5.4-mini",
+      catalogFor,
+      profiles,
     });
 
     expect(choices).toEqual([
@@ -145,6 +160,27 @@ describe("buildProviderRecoveryChoices", () => {
         modelId: "gpt-5.4-mini",
         enabled: false,
         reason: "provider unavailable",
+      },
+    ]);
+  });
+
+  it("skips a profile-arm preference, which names no adapter", async () => {
+    const choices = await buildProviderRecoveryChoices({
+      currentAdapterId: "claude-code",
+      connectedAdapterIds: ["claude-code", "codex"],
+      stepPreferences: [{ kind: "profile", ref: "reasoning" }],
+      operators: [agent("claude-code", true), agent("codex", true)],
+      catalogFor,
+      profiles,
+    });
+
+    expect(choices).toEqual([
+      {
+        adapterId: "codex",
+        displayName: "Codex",
+        modelId: null,
+        enabled: false,
+        reason: "not configured for this step",
       },
     ]);
   });

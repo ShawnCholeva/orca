@@ -1,0 +1,13 @@
+-- 0069_step_run_effort.sql
+-- The effort level the step's model actually ran at.
+--
+-- `selected_model_id` keeps the full dispatch string ("claude-opus-5[1m]"), so
+-- the "distinguish providers by model prefix" convention the OTEL cost reader
+-- depends on still holds. Effort has no such home and is a separate axis: the
+-- same model at max costs materially more than at low, so attributing an
+-- outcome to a model without it is attributing it to half a fact.
+--
+-- Additive and nullable. Rows written before this land carry NULL, and a reader
+-- must treat those as UNKNOWN effort rather than assuming the default — under
+-- the old behaviour they ran at whatever the ambient settings said.
+ALTER TABLE workflow_step_runs ADD COLUMN selected_effort TEXT;

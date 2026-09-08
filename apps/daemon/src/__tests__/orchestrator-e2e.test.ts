@@ -112,7 +112,7 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
           name: "Plan",
           instructions: "Plan the work and produce a problem statement.",
           outputSchema: [{ key: "problem", type: "string", required: true }],
-          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+          agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
         }),
         makeStep({
           id: "build",
@@ -120,7 +120,7 @@ describe("orchestrator-mediated workflow e2e (service-level happy path)", () => 
           name: "Build",
           instructions: "Implement the plan.",
           outputSchema: [{ key: "result", type: "string", required: true }],
-          agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }],
+          agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }],
         }),
       ],
     });

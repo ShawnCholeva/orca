@@ -27,17 +27,24 @@ const CATEGORY = "Engineering";
 
 // agentPreference is a non-binding ordered hint; selection always ranks over the
 // user's connected operators and falls back to capability/cost ranking.
+const pin = (adapterId: "claude-code" | "codex", modelId: string): StepAgentChoice => ({
+  kind: "pinned",
+  adapterId,
+  modelId,
+  contextVariant: "default",
+  effort: null,
+});
 const REASONING: StepAgentChoice[] = [
-  { adapterId: "claude-code", modelId: "claude-opus-4-7" },
-  { adapterId: "codex", modelId: "gpt-5.5" },
+  pin("claude-code", "claude-opus-4-7"),
+  pin("codex", "gpt-5.5"),
 ];
 const EXECUTION: StepAgentChoice[] = [
-  { adapterId: "claude-code", modelId: "claude-sonnet-4-6" },
-  { adapterId: "codex", modelId: "gpt-5.3-codex" },
+  pin("claude-code", "claude-sonnet-4-6"),
+  pin("codex", "gpt-5.3-codex"),
 ];
 const LIGHT: StepAgentChoice[] = [
-  { adapterId: "claude-code", modelId: "claude-haiku-4-5" },
-  { adapterId: "codex", modelId: "gpt-5.4-mini" },
+  pin("claude-code", "claude-haiku-4-5"),
+  pin("codex", "gpt-5.4-mini"),
 ];
 
 const APPROVAL_MARK_DONE: WorkflowGuardrailConfig = {

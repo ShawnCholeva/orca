@@ -3,8 +3,8 @@ import { buildStepExecutionInput } from "./step-input.js";
 import type { WorkflowArtifact, WorkflowStepTemplate } from "@orca/contracts";
 
 const steps: WorkflowStepTemplate[] = [
-  { id: "intake", ordinal: 0, name: "Intake", instructions: "i0", outputSchema: [{ key: "problem", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
-  { id: "research", ordinal: 1, name: "Research", instructions: "i1", outputSchema: [{ key: "summary", type: "string", required: true }], agentPreference: [{ adapterId: "claude-code", modelId: "claude-haiku-4-5" }] },
+  { id: "intake", ordinal: 0, name: "Intake", instructions: "i0", outputSchema: [{ key: "problem", type: "string", required: true }], agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }] },
+  { id: "research", ordinal: 1, name: "Research", instructions: "i1", outputSchema: [{ key: "summary", type: "string", required: true }], agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null }] },
 ];
 const goal = { id: "g", intent: "make it scroll" };
 

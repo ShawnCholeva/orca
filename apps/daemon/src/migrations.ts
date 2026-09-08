@@ -81,6 +81,7 @@ export const migrationFiles = [
   "0066_step_run_blocked_code.sql",
   "0067_model_catalog_cache.sql",
   "0068_session_model_choice.sql",
+  "0069_step_run_effort.sql",
 ] as const;
 
 export function runMigrations(

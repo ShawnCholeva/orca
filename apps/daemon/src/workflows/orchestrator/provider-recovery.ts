@@ -1,34 +1,49 @@
 import {
   AdapterId,
   ORCHESTRATION_WORKER_OUTPUT_TAIL_MAX_BYTES,
+  asPinned,
+  type CatalogModel,
   type OperatorDescriptor,
   type ProviderRecoveryChoice,
   type StepAgentChoice,
 } from "@orca/contracts";
+import type { ModelProfile } from "../../adapters/model-catalog/profiles.js";
+import { resolveChoice } from "../../adapters/model-catalog/resolve-choice.js";
 import type { AgentInitialPromptInput } from "../../orchestrator-llm/prompts.js";
 import { composeAgentInitialPrompt } from "../../orchestrator-llm/prompts.js";
+import type { StepDispatchCapabilities } from "./dispatch-types.js";
+import { resolveStepDispatch, type ResolvedStepDispatch } from "./step-dispatch.js";
 
 export interface BuildProviderRecoveryChoicesInput {
   currentAdapterId: string;
   connectedAdapterIds: string[];
   stepPreferences: StepAgentChoice[];
   operators: OperatorDescriptor[];
-  supportsModel(adapterId: string, modelId: string): boolean;
+  catalogFor(adapterId: AdapterId): Promise<CatalogModel[]>;
+  profiles: ModelProfile[];
 }
 
-export function buildProviderRecoveryChoices(
+export async function buildProviderRecoveryChoices(
   input: BuildProviderRecoveryChoicesInput
-): ProviderRecoveryChoice[] {
+): Promise<ProviderRecoveryChoice[]> {
+  // A profile-arm preference names no adapter, so it cannot key this map. Its
+  // adapter is decided at dispatch, not authored — the recovery list offers only
+  // the adapters the step actually pinned.
   const preferenceByAdapter = new Map(
-    input.stepPreferences.map((preference) => [preference.adapterId, preference])
+    input.stepPreferences
+      .map((preference) => asPinned(preference))
+      .filter((preference) => preference !== null)
+      .map((preference) => [preference.adapterId, preference])
   );
   const connected = new Set(input.connectedAdapterIds);
 
-  return input.operators
+  const eligible = input.operators
     .filter((operator) => operator.kind === "agent")
     .filter((operator) => connected.has(operator.id.slice("agent:".length)))
-    .filter((operator) => operator.id !== `agent:${input.currentAdapterId}`)
-    .map((operator): ProviderRecoveryChoice => {
+    .filter((operator) => operator.id !== `agent:${input.currentAdapterId}`);
+
+  return Promise.all(
+    eligible.map(async (operator): Promise<ProviderRecoveryChoice> => {
       const adapterId = AdapterId.parse(operator.id.slice("agent:".length));
       const preference = preferenceByAdapter.get(adapterId);
 
@@ -42,7 +57,9 @@ export function buildProviderRecoveryChoices(
         };
       }
 
-      if (!input.supportsModel(adapterId, preference.modelId)) {
+      const catalog = await input.catalogFor(adapterId);
+      const resolved = resolveChoice(preference, catalog, adapterId, input.profiles);
+      if (!resolved) {
         return {
           adapterId,
           displayName: operator.displayName,
@@ -55,11 +72,35 @@ export function buildProviderRecoveryChoices(
       return {
         adapterId,
         displayName: operator.displayName,
-        modelId: preference.modelId,
+        modelId: resolved.modelId,
         enabled: operator.ready,
         reason: operator.ready ? null : (operator.notReadyReason ?? "provider unavailable"),
       };
-    });
+    })
+  );
+}
+
+/**
+ * Resolve the step's own preferences against ONE adapter — the provider the
+ * operator switched to (or retried). Recovery has already established that this
+ * adapter is ready, so readiness is pinned true and the adapter order is a
+ * single entry, which also lets a profile-arm preference resolve here.
+ *
+ * Null when nothing resolves; the caller decides whether that is fatal.
+ */
+export async function resolveRecoveryDispatch(
+  stepDispatch: StepDispatchCapabilities,
+  preferences: StepAgentChoice[],
+  adapterId: AdapterId
+): Promise<ResolvedStepDispatch | null> {
+  return resolveStepDispatch({
+    preferences,
+    isAdapterReady: async (id) => id === adapterId,
+    catalogFor: (id) => stepDispatch.catalogFor(id),
+    profiles: stepDispatch.profiles,
+    resolveMode: (id) => stepDispatch.resolveMode(id),
+    adapterOrder: [adapterId],
+  }).catch(() => null);
 }
 
 export interface ComposeProviderSwitchPromptInput {

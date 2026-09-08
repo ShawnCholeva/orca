@@ -1,6 +1,9 @@
 import { EventBus } from "../../events.js";
 import type { ResolvedMode } from "../../adapters/dispatcher.js";
+import type { ModelProfile } from "../../adapters/model-catalog/profiles.js";
 import type {
+  AdapterId,
+  CatalogModel,
   RefuteFacet,
   StateDepsFacet,
   WorkflowStepResult,
@@ -8,7 +11,10 @@ import type {
 
 export interface StepDispatchCapabilities {
   isAdapterReady(adapterId: string): Promise<boolean>;
-  supportsModel(adapterId: string, modelId: string): boolean;
+  /** The installed CLI's model lineup. Membership here — not a hardcoded list —
+   *  decides whether a preference is dispatchable. */
+  catalogFor(adapterId: AdapterId): Promise<CatalogModel[]>;
+  profiles: ModelProfile[];
   resolveMode(adapterId: string): ResolvedMode;
 }
 

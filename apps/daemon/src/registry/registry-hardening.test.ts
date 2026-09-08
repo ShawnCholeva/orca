@@ -90,6 +90,7 @@ describe("registry hardening", () => {
         checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
         repairFor: () => undefined,
         supportsModel: () => false,
+        modelSpawnArgs: () => [],
       })
     ).toThrowError("AdapterRegistry is frozen");
   });
@@ -107,6 +108,7 @@ describe("registry hardening", () => {
       checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
       repairFor: () => undefined,
       supportsModel: () => false,
+      modelSpawnArgs: () => [],
     });
 
     expect(() =>
@@ -121,6 +123,7 @@ describe("registry hardening", () => {
         checkAuth: async () => ({ name: 'authenticated' as const, ok: true, authStatus: 'ready' as const, command: '' }),
         repairFor: () => undefined,
         supportsModel: () => false,
+        modelSpawnArgs: () => [],
       })
     ).toThrowError("Duplicate adapter id: claude-code");
   });

@@ -126,10 +126,17 @@ export function listStepRunsForRun(
 export function recordOperatorSelection(
   db: Database.Database,
   id: string,
-  sel: { operatorId: string; providerId: string | null; modelId: string | null; at: string }
+  sel: {
+    operatorId: string;
+    providerId: string | null;
+    /** The full dispatch string ("claude-opus-5[1m]"), not the bare catalog id. */
+    modelId: string | null;
+    effort: string | null;
+    at: string;
+  }
 ): void {
   db.prepare(
-    "UPDATE workflow_step_runs SET selected_operator_id=?, selected_provider_id=?, selected_model_id=?, operator_selected_at=? WHERE id=?"
-  ).run(sel.operatorId, sel.providerId, sel.modelId, sel.at, id);
+    "UPDATE workflow_step_runs SET selected_operator_id=?, selected_provider_id=?, selected_model_id=?, selected_effort=?, operator_selected_at=? WHERE id=?"
+  ).run(sel.operatorId, sel.providerId, sel.modelId, sel.effort, sel.at, id);
   resetWorkflowStepProjectionPreparedStatements();
 }

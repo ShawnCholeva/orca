@@ -10,7 +10,7 @@ function step(id: string, ordinal: number): WorkflowStepTemplate {
     name: id,
     instructions: "do",
     outputSchema: [{ key: "s", type: "string", required: true }],
-    agentPreference: [{ adapterId: "claude-code", modelId: "m" }],
+    agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "m", contextVariant: "default", effort: null }],
   };
 }
 
@@ -140,7 +140,7 @@ describe("validateGraph", () => {
       nodes: [
         { id: "a", type: "step", name: "A", stepId: "a" },
         { id: "g", type: "gate", name: "G", evalSubstrate: "worker", instructions: "x",
-          agentPreference: [{ adapterId: "claude-code", modelId: "claude-opus-4-8" }] },
+          agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "claude-opus-4-8", contextVariant: "default", effort: null }] },
         { id: "b", type: "step", name: "B", stepId: "b", terminal: true },
       ],
       edges: [ {from:"a",to:"g"}, {from:"g",to:"b",port:"approved"}, {from:"g",to:"a",port:"rejected"} ],
@@ -208,7 +208,7 @@ describe("validateSchemaReferences", () => {
       name: id,
       instructions,
       outputSchema: produces.map((k) => ({ key: k, type: "string" as const, required: true })),
-      agentPreference: [{ adapterId: "claude-code", modelId: "m" }],
+      agentPreference: [{ kind: "pinned", adapterId: "claude-code", modelId: "m", contextVariant: "default", effort: null }],
     };
   }
 

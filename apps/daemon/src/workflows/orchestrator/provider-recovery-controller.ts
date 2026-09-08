@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import {
+  AdapterId,
   ProviderRecoveryCheckpoint,
   type WorkflowRun as WorkflowRunT,
   type WorkflowStepTemplate,
@@ -9,7 +10,7 @@ import type { OperatorRegistry } from "../operators/registry.js";
 import { loadRunTemplate } from "../runs/run-template.js";
 import { getWorkflowRunById } from "../runs/projection.js";
 import { listAgents } from "../../agents.js";
-import { buildProviderRecoveryChoices, composeProviderSwitchPrompt } from "./provider-recovery.js";
+import { buildProviderRecoveryChoices, composeProviderSwitchPrompt, resolveRecoveryDispatch } from "./provider-recovery.js";
 import { decodeSessionTail } from "./session-tail.js";
 import { collectPriorStepArtifacts, latestRejectingGate } from "./repair-context.js";
 import type { RunnerPort } from "./runner-port.js";
@@ -308,12 +309,14 @@ export class ProviderRecoveryController {
       agentIds: connectedAdapterIds,
       includeNonAgents: false,
     });
-    const choices = buildProviderRecoveryChoices({
+    const stepDispatch = this.deps.stepDispatch;
+    const choices = await buildProviderRecoveryChoices({
       currentAdapterId: checkpoint.currentAdapterId,
       connectedAdapterIds,
       stepPreferences: preferencesForGoal(stepTpl.agentPreference, goal.orchestrator_provider),
       operators: operatorDescriptors,
-      supportsModel: (id, mid) => this.deps.stepDispatch?.supportsModel(id, mid) ?? false,
+      catalogFor: (id) => stepDispatch?.catalogFor(id) ?? Promise.resolve([]),
+      profiles: stepDispatch?.profiles ?? [],
     });
     this.persistCheckpoint(db, stepRun.id, { ...checkpoint, choices });
   }
@@ -427,7 +430,18 @@ export class ProviderRecoveryController {
         objective: handoffPrompt,
       });
       sessionId = launched.sessionId;
-      await this.deps.runner.workerSpawn({ sessionId, goalId: goal.id, adapterId });
+      // Respawn on the model the step resolves to for THIS adapter, not the
+      // ambient CLI default — a recovery run is still the step's run.
+      const model = this.deps.stepDispatch
+        ? (
+            await resolveRecoveryDispatch(
+              this.deps.stepDispatch,
+              preferencesForGoal(stepTpl.agentPreference, goal.orchestrator_provider),
+              AdapterId.parse(adapterId)
+            )
+          )?.model
+        : undefined;
+      await this.deps.runner.workerSpawn({ sessionId, goalId: goal.id, adapterId, model });
     } catch (err) {
       this.persistCheckpoint(db, stepRun.id, {
         ...checkpoint,

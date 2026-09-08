@@ -395,6 +395,7 @@ function makeStartRegistry(cwd: string): AdapterRegistry {
       return undefined;
     },
     supportsModel: () => false,
+    modelSpawnArgs: () => [],
   });
   return registry;
 }

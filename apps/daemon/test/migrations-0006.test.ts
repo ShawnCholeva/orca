@@ -204,6 +204,9 @@ describe('context migration 0006_context.sql', () => {
       '0064_step_run_stall_rescues.sql',
       '0065_step_run_awaiting_user.sql',
       '0066_step_run_blocked_code.sql',
+      '0067_model_catalog_cache.sql',
+      '0068_session_model_choice.sql',
+      '0069_step_run_effort.sql',
     ]);
 
     const tables = (
@@ -337,6 +340,9 @@ describe('context migration 0006_context.sql', () => {
       '0064_step_run_stall_rescues.sql',
       '0065_step_run_awaiting_user.sql',
       '0066_step_run_blocked_code.sql',
+      '0067_model_catalog_cache.sql',
+      '0068_session_model_choice.sql',
+      '0069_step_run_effort.sql',
     ]);
 
     const counts = {

@@ -15,11 +15,13 @@ import { registerOrchestratorRoutes } from "./routes.js";
 import {
   createConfig,
   fakeBroker,
+  fakeCatalog,
   fakeRegistry,
   fakeStepDispatch,
   NOW,
   seedSkillWorkflow,
 } from "./skill-step-test-helpers.js";
+import { SEED_PROFILES } from "../../adapters/model-catalog/profiles.js";
 
 // These cover the fix for the "run parks with an operator selected and no
 // worker" bug: requestNextDecision only *selects* the current step's operator
@@ -164,9 +166,10 @@ describe("POST /v1/goals/:goalId/workflow-runs/:id/next-decision — launch foll
         if (calls > 1) throw new Error("adapter readiness check exploded");
         return adapterId === "claude-code";
       },
-      supportsModel(adapterId: string, modelId: string) {
-        return adapterId === "claude-code" && modelId === "claude-haiku-4-5";
+      async catalogFor(adapterId: string) {
+        return adapterId === "claude-code" ? fakeCatalog(["claude-haiku-4-5"]) : [];
       },
+      profiles: SEED_PROFILES,
       resolveMode(adapterId: string) {
         return { adapterId, mode: "one_shot" as const, fallbacks: ["shadow_session" as const] };
       },
