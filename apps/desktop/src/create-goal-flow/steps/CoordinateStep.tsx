@@ -1,19 +1,17 @@
 import { useState, useEffect, type CSSProperties, type Dispatch } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { isTauri } from "@tauri-apps/api/core";
-import type { FlowAction, FlowState, PendingWorkspace, PendingDocument } from "../state";
-import type { ModelProviderInfo, WorkflowTemplate, WorkspaceSummary } from "@orca/contracts";
+import type { FlowAction, FlowState, PendingWorkspace } from "../state";
+import type { ModelProviderInfo, WorkspaceSummary } from "@orca/contracts";
 import {
   inspectWorkspace,
   listModelProviders,
-  listWorkflowTemplates,
   listWorkspaces,
   toErrorMessage,
 } from "../../api";
 import type { ApiError } from "../../api";
 import { defaultModelForProvider } from "../orchestratorDefaults";
 import { expandTilde } from "../../utils/path";
-import { detectDocumentKind, defaultDocumentName } from "../documents";
 import { Field, FieldGroup, Btn, Pill, MiniSelect, inputStyle } from "../../workspaces/primitives";
 import { Icon } from "../../workspaces/icons";
 
@@ -25,7 +23,6 @@ type Props = {
 };
 
 const SOFT_CAP = 8;
-const DOCS_SOFT_CAP = 20;
 
 const PROVIDER_LABELS: Record<string, string> = {
   "orca/openai": "OpenAI",
@@ -70,162 +67,31 @@ function WorkspaceRow({
   dispatch: Dispatch<FlowAction>;
 }) {
   return (
-    <div style={rowStyle}>
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-        <input
-          type="text"
-          value={ws.name}
-          maxLength={100}
-          onChange={(e) => dispatch({ type: "editPendingName", index, name: e.target.value })}
-          aria-label="Workspace name"
-          style={{ ...inputStyle, padding: "5px 8px", fontSize: 12.5, fontWeight: 600 }}
-        />
-        <span style={monoPathStyle}>{ws.path}</span>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          <Pill tone="neutral" size="xs">
-            {ws.workspaceType}
-          </Pill>
-          {ws.branch && (
-            <Pill tone="info" size="xs">
-              {ws.branch}
-            </Pill>
-          )}
-          {ws.isDirty === true && (
-            <Pill tone="warn" size="xs">
-              dirty
-            </Pill>
-          )}
-        </div>
-      </div>
-      <Btn kind="danger" size="xs" onClick={() => dispatch({ type: "removePending", index })}>
-        Remove
-      </Btn>
+    <div style={{ ...rowStyle, alignItems: "center" }}>
+      <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)", whiteSpace: "nowrap" }}>
+        {ws.name}
+      </span>
+      <span style={{ ...monoPathStyle, flex: 1, minWidth: 0 }}>{ws.path}</span>
+      {ws.branch && (
+        <Pill tone="info" size="xs">
+          {ws.branch}
+        </Pill>
+      )}
+      {ws.isDirty === true && (
+        <Pill tone="warn" size="xs">
+          dirty
+        </Pill>
+      )}
+      <button
+        type="button"
+        className="criterion-remove"
+        aria-label={`Remove ${ws.name}`}
+        title="Remove workspace"
+        onClick={() => dispatch({ type: "removePending", index })}
+      >
+        ✕
+      </button>
     </div>
-  );
-}
-
-// ── Document row ───────────────────────────────────────────────
-function DocumentRow({
-  doc,
-  index,
-  dispatch,
-}: {
-  doc: PendingDocument;
-  index: number;
-  dispatch: Dispatch<FlowAction>;
-}) {
-  return (
-    <div style={rowStyle}>
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text)" }}>{doc.name}</span>
-        <span style={monoPathStyle}>{doc.ref}</span>
-        <div>
-          <Pill tone="neutral" size="xs">
-            {doc.kind}
-          </Pill>
-        </div>
-      </div>
-      <Btn kind="danger" size="xs" onClick={() => dispatch({ type: "removeDocument", index })}>
-        Remove
-      </Btn>
-    </div>
-  );
-}
-
-// ── Reference documents block ──────────────────────────────────
-function DocumentsBlock({
-  state,
-  dispatch,
-}: {
-  state: Extract<FlowState, { phase: "coordinate" }>;
-  dispatch: Dispatch<FlowAction>;
-}) {
-  const [ref, setRef] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const atCap = state.pendingDocuments.length >= DOCS_SOFT_CAP;
-
-  function addResolvedRef(kind: "file" | "url", resolved: string): boolean {
-    if (state.pendingDocuments.some((d) => d.ref === resolved)) {
-      setError("Document already added.");
-      return false;
-    }
-    setError(null);
-    dispatch({
-      type: "addDocument",
-      document: { kind, ref: resolved, name: defaultDocumentName(kind, resolved) },
-    });
-    return true;
-  }
-
-  async function handleAdd() {
-    const trimmed = ref.trim();
-    if (!trimmed || atCap) return;
-    const kind = detectDocumentKind(trimmed);
-    const resolved = kind === "file" ? await expandTilde(trimmed) : trimmed;
-    if (addResolvedRef(kind, resolved)) setRef("");
-  }
-
-  async function handleBrowse() {
-    if (atCap) return;
-    const selected = await openDialog({ directory: false, multiple: true });
-    if (!selected) return;
-    for (const path of Array.isArray(selected) ? selected : [selected]) {
-      addResolvedRef("file", path as string);
-    }
-  }
-
-  return (
-    <FieldGroup
-      label="Reference documents"
-      hint="Attach plans or docs (local files or links) to include in the Goal's context."
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {state.pendingDocuments.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {state.pendingDocuments.map((doc, i) => (
-              <DocumentRow key={doc.ref} doc={doc} index={i} dispatch={dispatch} />
-            ))}
-          </div>
-        )}
-        {atCap ? (
-          <p style={mutedStyle}>Maximum {DOCS_SOFT_CAP} documents reached.</p>
-        ) : (
-          <>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="text"
-                value={ref}
-                onChange={(e) => {
-                  setRef(e.target.value);
-                  setError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void handleAdd();
-                  }
-                }}
-                placeholder="/path/to/plan.md or https://…"
-                aria-label="Document path or URL"
-                style={{ ...inputStyle, flex: 1, minWidth: 0 }}
-              />
-              <Btn kind="primary" onClick={() => void handleAdd()} disabled={!ref.trim()}>
-                Add
-              </Btn>
-              {/* Tauri-only, same reason as the workspace picker. No fallback is
-                  needed here: the text input beside it already accepts a path or a
-                  URL, so browser mode loses the convenience and keeps the capability. */}
-              {isTauri() && (
-                <Btn kind="quiet" onClick={() => void handleBrowse()}>
-                  Browse…
-                </Btn>
-              )}
-            </div>
-            {error && <p style={errorStyle}>{error}</p>}
-          </>
-        )}
-      </div>
-    </FieldGroup>
   );
 }
 
@@ -330,79 +196,6 @@ function OrchestratorFields({
   );
 }
 
-// ── Workflow selector ──────────────────────────────────────────
-function WorkflowField({
-  value,
-  onChange,
-}: {
-  value: string | null;
-  onChange: (id: string | null) => void;
-}) {
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    listWorkflowTemplates()
-      .then((res) => {
-        if (!cancelled) {
-          setTemplates(res.templates);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(toErrorMessage(err, "Failed to load workflows."));
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (loading) {
-    return (
-      <Field label="Workflow">
-        <p style={mutedStyle}>Loading workflows…</p>
-      </Field>
-    );
-  }
-
-  if (error) {
-    return (
-      <Field label="Workflow">
-        <p style={errorStyle}>{error}</p>
-      </Field>
-    );
-  }
-
-  if (templates.length === 0) {
-    return (
-      <Field label="Workflow">
-        <p style={mutedStyle}>No workflows available. Create one in the Workflows tab.</p>
-      </Field>
-    );
-  }
-
-  return (
-    <Field label="Workflow">
-      <MiniSelect
-        value={value}
-        options={templates.map((t) => ({
-          id: t.id,
-          name: t.name,
-          hint: t.description || undefined,
-        }))}
-        onChange={onChange}
-        icon={<Icon.workflow size={14} />}
-        placeholder="Choose workflow…"
-      />
-    </Field>
-  );
-}
-
 // ── Registered-workspace picker (inline dropdown) ──────────────
 function RegisteredWorkspaceSelect({
   existingPaths,
@@ -498,9 +291,7 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
   const [inspectError, setInspectError] = useState<string | null>(null);
   const [typedPath, setTypedPath] = useState("");
 
-  // The native picker is Tauri-only. Under `dev:browser` the IPC bridge is absent,
-  // so calling it threw into the console and the button did nothing visible — a
-  // control that looks available and silently fails. Same gate WorkspacesPage uses.
+  // Same Tauri gate WorkspacesPage uses; see the add row below.
   const tauri = isTauri();
 
   const atCap = state.pendingWorkspaces.length >= SOFT_CAP;
@@ -532,9 +323,6 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
     void addWorkspaceByPath(ws.path);
   }
 
-  // The browser-mode equivalent of the picker. Routes through the same
-  // addWorkspaceByPath as Browse and the registry, so the rest of the flow stays
-  // source-agnostic and there is no second definition of "add a workspace".
   async function handleAddTypedPath() {
     const path = typedPath.trim();
     if (!path || state.inspecting || atCap) return;
@@ -543,42 +331,45 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
   }
 
   const noWorkspace = state.pendingWorkspaces.length === 0;
-  const noWorkflow = state.workflowTemplateId === null;
-  const createDisabled = state.inspecting || noWorkspace || noWorkflow;
-  const createTitle = noWorkspace
-    ? "Add a workspace to continue"
-    : noWorkflow
-      ? "Select a workflow to continue"
-      : undefined;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {/* Workspaces */}
-      <FieldGroup label="Workspaces" hint="Add local folders or git repos this Goal will operate on.">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {state.pendingWorkspaces.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {state.pendingWorkspaces.map((ws, i) => (
-                <WorkspaceRow key={ws.path} ws={ws} index={i} dispatch={dispatch} />
-              ))}
-            </div>
-          )}
+      <FieldGroup label="Workspaces" hint="Folders or git repos this Goal will operate on. Add one or many.">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {state.pendingWorkspaces.map((ws, i) => (
+            <WorkspaceRow key={ws.path} ws={ws} index={i} dispatch={dispatch} />
+          ))}
           {atCap ? (
             <p style={mutedStyle}>Maximum {SOFT_CAP} workspaces reached.</p>
           ) : (
             <>
-              {tauri ? (
-                <div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <RegisteredWorkspaceSelect
+                    existingPaths={state.pendingWorkspaces.map((ws) => ws.path)}
+                    disabled={!!state.inspecting}
+                    onPick={handlePickRegistered}
+                    onNavigateToWorkspaces={onNavigateToWorkspaces}
+                  />
+                </div>
+                {tauri && (
                   <Btn
                     kind="quiet"
+                    size="md"
                     onClick={() => void handlePickFolder()}
                     disabled={state.inspecting}
                     icon={<Icon.folder size={14} />}
+                    title="Browse for a folder"
                   >
                     {state.inspecting ? "Inspecting…" : "Browse…"}
                   </Btn>
-                </div>
-              ) : (
+                )}
+              </div>
+              {/* The native picker is Tauri-only. Under `dev:browser` the IPC bridge is
+                  absent, so a typed path stands in for Browse. Both route through
+                  addWorkspaceByPath, so there is one definition of "add a workspace". */}
+              {!tauri && (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <input
                     type="text"
@@ -594,21 +385,18 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
                     aria-label="Workspace folder path"
                     style={{ ...inputStyle, flex: 1, minWidth: 0 }}
                   />
-                  <Btn
-                    kind="primary"
+                  <button
+                    type="button"
+                    className="criterion-add"
+                    aria-label="Add folder"
+                    title={state.inspecting ? "Inspecting…" : "Add folder"}
                     onClick={() => void handleAddTypedPath()}
                     disabled={!typedPath.trim() || state.inspecting}
                   >
-                    {state.inspecting ? "Inspecting…" : "Add folder"}
-                  </Btn>
+                    +
+                  </button>
                 </div>
               )}
-              <RegisteredWorkspaceSelect
-                existingPaths={state.pendingWorkspaces.map((ws) => ws.path)}
-                disabled={!!state.inspecting}
-                onPick={handlePickRegistered}
-                onNavigateToWorkspaces={onNavigateToWorkspaces}
-              />
               {inspectError && (
                 <p style={{ ...errorStyle, display: "flex", alignItems: "center", gap: 8 }}>
                   {inspectError}
@@ -623,9 +411,6 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
         </div>
       </FieldGroup>
 
-      {/* Reference documents */}
-      <DocumentsBlock state={state} dispatch={dispatch} />
-
       {/* Orchestrator LLM + model */}
       <OrchestratorFields
         value={state.orchestratorModel}
@@ -634,30 +419,25 @@ export function CoordinateStep({ state, dispatch, onNavigateToWorkspaces }: Prop
         }
       />
 
-      {/* Workflow */}
-      <WorkflowField
-        value={state.workflowTemplateId}
-        onChange={(id) => dispatch({ type: "setWorkflowTemplateId", workflowTemplateId: id })}
-      />
-
       {/* Footer actions */}
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <Btn
-          kind="quiet"
+      <div className="flow-step-actions">
+        <button
+          type="button"
+          className="back-button"
           onClick={() => dispatch({ type: "backToDescribe" })}
           disabled={state.inspecting}
-          icon={<Icon.chevronLeft size={14} />}
         >
-          Back
-        </Btn>
-        <Btn
-          kind="primary"
-          onClick={() => dispatch({ type: "submitRequested" })}
-          disabled={createDisabled}
-          title={createTitle}
+          ← Back
+        </button>
+        <button
+          type="button"
+          className="submit-button"
+          onClick={() => dispatch({ type: "proceedToWorkflow" })}
+          disabled={state.inspecting || noWorkspace}
+          title={noWorkspace ? "Add a workspace to continue" : undefined}
         >
-          Create Goal
-        </Btn>
+          Next →
+        </button>
       </div>
     </div>
   );

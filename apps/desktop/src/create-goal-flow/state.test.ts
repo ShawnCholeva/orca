@@ -27,7 +27,7 @@ function dispatch(state: FlowState, action: FlowAction): FlowState {
 describe("reducer — rough phase", () => {
   it("setTitle updates title and clears error", () => {
     const s = dispatch(
-      { phase: "rough", title: "", intent: "", successCriteria: ["ship it"], error: "oops" },
+      { phase: "rough", title: "", intent: "", successCriteria: ["ship it"], pendingDocuments: [], error: "oops" },
       { type: "setTitle", title: "New Title" },
     );
     expect(s).toMatchObject({ phase: "rough", title: "New Title", error: undefined });
@@ -50,6 +50,7 @@ describe("reducer — rough phase", () => {
       title: "My Goal",
       intent: "some desc",
       successCriteria: ["ship it"],
+      pendingDocuments: [],
     };
     const s = dispatch(rough, { type: "proceedToCoordinate" });
     expect(s).toEqual({
@@ -122,9 +123,22 @@ describe("reducer — coordinate phase", () => {
     expect(s).toMatchObject({ phase: "coordinate", orchestratorModel });
   });
 
-  it("setWorkflowTemplateId stores the selected workflow", () => {
-    const s = dispatch(coordinate, { type: "setWorkflowTemplateId", workflowTemplateId: "wf-1" });
-    expect(s).toMatchObject({ phase: "coordinate", workflowTemplateId: "wf-1" });
+  it("setWorkflowTemplateId is a no-op in the coordinate phase", () => {
+    expect(dispatch(coordinate, { type: "setWorkflowTemplateId", workflowTemplateId: "wf-1" })).toBe(coordinate);
+  });
+
+  it("proceedToWorkflow transitions coordinate → workflow, carrying everything and dropping inspecting", () => {
+    const s = dispatch({ ...coordinate, orchestratorModel, inspecting: true }, { type: "proceedToWorkflow" });
+    expect(s).toEqual({
+      phase: "workflow",
+      title: "T",
+      intent: "D",
+      successCriteria: ["ship it"],
+      pendingWorkspaces: [],
+      pendingDocuments: [],
+      orchestratorModel,
+      workflowTemplateId: null,
+    });
   });
 
   it("inspectRequested sets inspecting=true and clears error", () => {
@@ -173,36 +187,23 @@ describe("reducer — coordinate phase", () => {
     expect(s.pendingWorkspaces[0]!.name).toBe("b");
   });
 
-  it("editPendingName updates the name of a pending workspace", () => {
-    const pending = [
-      { inputPath: "/a", name: "a", path: "/a", workspaceType: "folder" as const, branch: null, isDirty: null, gitProbe: "not_a_repo" as const },
-    ];
-    const s = dispatch(
-      { ...coordinate, pendingWorkspaces: pending },
-      { type: "editPendingName", index: 0, name: "renamed" },
-    );
-    if (s.phase !== "coordinate") throw new Error("expected coordinate");
-    expect(s.pendingWorkspaces[0]!.name).toBe("renamed");
+  it("submitRequested is a no-op in the coordinate phase", () => {
+    const coord = { ...coordinate, orchestratorModel, workflowTemplateId: "wf-1" };
+    expect(dispatch(coord, { type: "submitRequested" })).toBe(coord);
   });
 
-  it("submitRequested transitions to submitting", () => {
-    const s = dispatch(
-      { ...coordinate, orchestratorModel, workflowTemplateId: "wf-1" },
-      { type: "submitRequested" },
-    );
-    expect(s).toMatchObject({
-      phase: "submitting",
-      orchestratorModel,
-      workflowTemplateId: "wf-1",
-      pendingWorkspaces: [],
-      pendingDocuments: [],
-    });
-  });
+  const rough: Extract<FlowState, { phase: "rough" }> = {
+    phase: "rough",
+    title: "T",
+    intent: "I",
+    successCriteria: ["ship it"],
+    pendingDocuments: [],
+  };
 
-  it("addDocument appends a pending document and clears error", () => {
+  it("addDocument appends a pending document and clears error in the rough phase", () => {
     const doc = { kind: "file" as const, ref: "/docs/plan.md", name: "plan.md" };
-    const s = dispatch({ ...coordinate, error: "old" }, { type: "addDocument", document: doc });
-    if (s.phase !== "coordinate") throw new Error("expected coordinate");
+    const s = dispatch({ ...rough, error: "old" }, { type: "addDocument", document: doc });
+    if (s.phase !== "rough") throw new Error("expected rough");
     expect(s.pendingDocuments).toEqual([doc]);
     expect(s.error).toBeUndefined();
   });
@@ -213,32 +214,76 @@ describe("reducer — coordinate phase", () => {
       { kind: "url" as const, ref: "https://x.test/b", name: "b" },
     ];
     const s = dispatch(
-      { ...coordinate, pendingDocuments: docs },
+      { ...rough, pendingDocuments: docs },
       { type: "removeDocument", index: 0 },
     );
-    if (s.phase !== "coordinate") throw new Error("expected coordinate");
+    if (s.phase !== "rough") throw new Error("expected rough");
     expect(s.pendingDocuments).toEqual([docs[1]]);
   });
 
-  it("addDocument is no-op outside coordinate phase", () => {
+  it("addDocument is no-op outside the rough phase", () => {
     expect(
-      dispatch(initialState, { type: "addDocument", document: { kind: "file", ref: "/a", name: "a" } }),
-    ).toBe(initialState);
+      dispatch(coordinate, { type: "addDocument", document: { kind: "file", ref: "/a", name: "a" } }),
+    ).toBe(coordinate);
+  });
+
+  it("proceedToCoordinate carries pendingDocuments forward and backToDescribe brings them back", () => {
+    const docs = [{ kind: "url" as const, ref: "https://x.test/spec", name: "spec" }];
+    const forward = dispatch(
+      { ...rough, pendingDocuments: docs },
+      { type: "proceedToCoordinate" },
+    );
+    expect(forward).toMatchObject({ phase: "coordinate", pendingDocuments: docs });
+    expect(dispatch(forward, { type: "backToDescribe" })).toMatchObject({ phase: "rough", pendingDocuments: docs });
+  });
+
+  it("inspectRequested is no-op outside coordinate phase", () => {
+    expect(dispatch(initialState, { type: "inspectRequested" })).toBe(initialState);
+  });
+});
+
+describe("reducer — workflow phase", () => {
+  const workflow: FlowState = {
+    phase: "workflow",
+    title: "T",
+    intent: "D",
+    successCriteria: ["ship it"],
+    pendingWorkspaces: [],
+    pendingDocuments: [],
+    orchestratorModel,
+    workflowTemplateId: null,
+  };
+
+  it("setWorkflowTemplateId stores the selected workflow", () => {
+    const s = dispatch(workflow, { type: "setWorkflowTemplateId", workflowTemplateId: "wf-1" });
+    expect(s).toMatchObject({ phase: "workflow", workflowTemplateId: "wf-1" });
+  });
+
+  it("backToCoordinate returns to coordinate keeping the selected workflow", () => {
+    const s = dispatch({ ...workflow, workflowTemplateId: "wf-1" }, { type: "backToCoordinate" });
+    expect(s).toMatchObject({ phase: "coordinate", orchestratorModel, workflowTemplateId: "wf-1" });
+  });
+
+  it("submitRequested transitions to submitting", () => {
+    const s = dispatch({ ...workflow, workflowTemplateId: "wf-1" }, { type: "submitRequested" });
+    expect(s).toMatchObject({
+      phase: "submitting",
+      orchestratorModel,
+      workflowTemplateId: "wf-1",
+      pendingWorkspaces: [],
+      pendingDocuments: [],
+    });
   });
 
   it("submitRequested carries pendingDocuments into submitting, and submitFailed brings them back", () => {
     const docs = [{ kind: "url" as const, ref: "https://x.test/spec", name: "spec" }];
     const submitting = dispatch(
-      { ...coordinate, pendingDocuments: docs, workflowTemplateId: "wf-1" },
+      { ...workflow, pendingDocuments: docs, workflowTemplateId: "wf-1" },
       { type: "submitRequested" },
     );
     expect(submitting).toMatchObject({ phase: "submitting", pendingDocuments: docs });
     const back = dispatch(submitting, { type: "submitFailed", error: "boom" });
-    expect(back).toMatchObject({ phase: "coordinate", pendingDocuments: docs, error: "boom" });
-  });
-
-  it("inspectRequested is no-op outside coordinate phase", () => {
-    expect(dispatch(initialState, { type: "inspectRequested" })).toBe(initialState);
+    expect(back).toMatchObject({ phase: "workflow", pendingDocuments: docs, error: "boom" });
   });
 });
 
@@ -259,10 +304,10 @@ describe("reducer — submitting phase", () => {
     expect(s).toEqual({ phase: "done", goalId: "g-123" });
   });
 
-  it("submitFailed → coordinate with error, preserving pendingWorkspaces", () => {
+  it("submitFailed → workflow with error, preserving pendingWorkspaces", () => {
     const s = dispatch(submitting, { type: "submitFailed", error: "server error" });
     expect(s).toMatchObject({
-      phase: "coordinate",
+      phase: "workflow",
       orchestratorModel,
       error: "server error",
       pendingWorkspaces: [],
@@ -371,18 +416,18 @@ describe("reducer — workflowFailed phase", () => {
     expect(dispatch(initialState, { type: "retryWorkflowStart" })).toBe(initialState);
   });
 
-  it("submitRequested from coordinate with workflowTemplateId null still transitions (guard is in UI, not reducer)", () => {
-    const coord: FlowState = {
-      phase: "coordinate",
+  it("submitRequested from workflow with workflowTemplateId null still transitions (guard is in UI, not reducer)", () => {
+    const wf: FlowState = {
+      phase: "workflow",
       title: "T",
       intent: "D",
       successCriteria: ["ship it"],
       pendingWorkspaces: [],
-    pendingDocuments: [],
+      pendingDocuments: [],
       orchestratorModel: null,
       workflowTemplateId: null,
     };
-    const s = dispatch(coord, { type: "submitRequested" });
+    const s = dispatch(wf, { type: "submitRequested" });
     expect(s.phase).toBe("submitting");
   });
 });

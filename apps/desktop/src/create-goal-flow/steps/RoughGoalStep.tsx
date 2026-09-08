@@ -1,5 +1,6 @@
 import type { Dispatch } from "react";
 import type { FlowAction, FlowState } from "../state";
+import { DocumentsBlock } from "./DocumentsBlock";
 
 type Props = {
   state: Extract<FlowState, { phase: "rough" }>;
@@ -37,7 +38,7 @@ export function RoughGoalStep({ state, dispatch }: Props) {
           onChange={(e) => dispatch({ type: "setIntent", intent: e.target.value })}
           maxLength={4000}
           required
-          placeholder={"What do you want to achieve and why? Describe the outcome, not the steps.\n\nOptionally include sections like:\nGoals:\n  - ...\nConstraints:\n  - ...\nAssumptions:\n  - ..."}
+          placeholder="What do you want to achieve and why? Describe the outcome, not the steps."
           rows={7}
         />
       </div>
@@ -57,11 +58,22 @@ export function RoughGoalStep({ state, dispatch }: Props) {
               placeholder="e.g. All tests pass in CI"
               aria-label={`Success criterion ${i + 1}`}
             />
-            {state.successCriteria.length > 1 && (
+            {i === state.successCriteria.length - 1 ? (
+              <button
+                type="button"
+                className="criterion-add"
+                aria-label="Add criterion"
+                title="Add criterion"
+                onClick={() => dispatch({ type: "addSuccessCriterion" })}
+              >
+                +
+              </button>
+            ) : (
               <button
                 type="button"
                 className="criterion-remove"
                 aria-label="Remove criterion"
+                title="Remove criterion"
                 onClick={() => dispatch({ type: "removeSuccessCriterion", index: i })}
               >
                 ✕
@@ -69,14 +81,9 @@ export function RoughGoalStep({ state, dispatch }: Props) {
             )}
           </div>
         ))}
-        <button
-          type="button"
-          className="criterion-add"
-          onClick={() => dispatch({ type: "addSuccessCriterion" })}
-        >
-          + Add criterion
-        </button>
       </div>
+
+      <DocumentsBlock documents={state.pendingDocuments} dispatch={dispatch} />
 
       {state.error && <div className="form-error">{state.error}</div>}
 

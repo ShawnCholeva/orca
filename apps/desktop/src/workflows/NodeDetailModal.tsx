@@ -454,7 +454,6 @@ function StepBody({
         onChange={(next) => !readOnly && detail.onChange({ outputSchema: next })}
         disabled={readOnly}
         onValidityChange={(valid) => onOutputSchemaValidityChange?.(!valid)}
-        minHeight={300}
       />
 
       <label style={{ display: "flex", alignItems: "center", gap: 8 }}>

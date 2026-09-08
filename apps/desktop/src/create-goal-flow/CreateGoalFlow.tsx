@@ -3,6 +3,7 @@ import { reducer, initialState } from "./state";
 import type { WorkflowFailedState } from "./state";
 import { RoughGoalStep } from "./steps/RoughGoalStep";
 import { CoordinateStep } from "./steps/CoordinateStep";
+import { WorkflowStep } from "./steps/WorkflowStep";
 import { createGoalAndStartWorkflow, inspectWorkspace } from "../api";
 import type { ApiError } from "../api";
 import type { ConnectionStatus } from "../api";
@@ -17,16 +18,14 @@ type Props = {
   onNavigateToWorkspaces?: () => void;
 };
 
-const STEP_LABELS = ["Describe", "Coordinate"];
-const STEP_NUMS = ["01", "02"];
+const STEP_LABELS = ["Describe", "Coordinate", "Workflow"];
+const STEP_NUMS = ["01", "02", "03"];
 
 function stepIndex(phase: string): number {
   switch (phase) {
     case "rough": return 0;
     case "coordinate": return 1;
-    case "submitting": return 1;
-    case "workflowFailed": return 1;
-    default: return 1;
+    default: return 2;
   }
 }
 
@@ -194,6 +193,10 @@ export function CreateGoalFlow({ onClose, onDone, connectionStatus: _connectionS
 
           {state.phase === "coordinate" && (
             <CoordinateStep state={state} dispatch={dispatch} onNavigateToWorkspaces={onNavigateToWorkspaces} />
+          )}
+
+          {state.phase === "workflow" && (
+            <WorkflowStep state={state} dispatch={dispatch} />
           )}
 
           {state.phase === "submitting" && (

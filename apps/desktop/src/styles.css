@@ -123,32 +123,34 @@ h2 {
   flex: 1;
 }
 
-.criterion-remove {
+.criterion-remove,
+.criterion-add {
   flex-shrink: 0;
-  padding: 4px 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   background: #fff;
-  color: #6b7280;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
 }
 
-.criterion-remove:hover {
-  background: #f9fafb;
+.criterion-remove {
   color: #dc2626;
 }
 
+.criterion-remove:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
 .criterion-add {
-  align-self: flex-start;
-  margin-top: 2px;
-  padding: 6px 10px;
-  border: 1px dashed #d1d5db;
-  border-radius: 6px;
-  background: #fff;
   color: #6366f1;
-  font-size: 13px;
-  cursor: pointer;
 }
 
 .criterion-add:hover {
@@ -503,6 +505,7 @@ h2 {
 
 .flow-step-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
 }
@@ -607,6 +610,29 @@ h2 {
   color: var(--accent-line);
 }
 
+.flow-modal .back-button {
+  padding: 8px 16px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.flow-modal .back-button:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: var(--hairline-strong);
+}
+
+.flow-modal .back-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .flow-modal .goal-action-button {
   background: var(--panel-2);
   border-color: var(--hairline);
@@ -640,30 +666,185 @@ h2 {
   color: var(--text-4);
 }
 
-.flow-modal .criterion-remove {
+.flow-modal .criterion-remove,
+.flow-modal .criterion-add {
   background: var(--panel-2);
   border-color: var(--hairline);
-  color: var(--text-3);
   border-radius: 7px;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.flow-modal .criterion-remove:hover {
-  background: var(--raised);
-  border-color: var(--hairline-strong);
+.flow-modal .criterion-remove {
   color: var(--err);
 }
 
+.flow-modal .criterion-remove:hover {
+  background: var(--raised);
+  border-color: var(--err);
+}
+
 .flow-modal .criterion-add {
-  background: var(--panel-2);
-  border: 1px dashed var(--hairline);
   color: var(--accent);
-  transition: background 120ms ease, border-color 120ms ease;
 }
 
 .flow-modal .criterion-add:hover {
   background: var(--raised);
   border-color: var(--accent-line);
+}
+
+/* ── Workflow step: type filter + template cards ─────────────── */
+.wf-pick-filter {
+  display: inline-flex;
+  align-self: flex-start;
+  margin: 6px 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+}
+
+.wf-pick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.wf-pick-chip:hover {
+  color: var(--text);
+}
+
+.wf-pick-chip--active {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.wf-pick-chip-count {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-4);
+}
+
+.wf-pick-chip--active .wf-pick-chip-count {
+  color: var(--accent);
+}
+
+.wf-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wf-card {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  min-height: 120px;
+  cursor: pointer;
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--raised) 0%, var(--panel-2) 100%);
+  border: 1px solid var(--hairline);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.wf-card:hover {
+  border-color: var(--hairline-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.wf-card:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+.wf-card--selected,
+.wf-card--selected:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
+  background: linear-gradient(180deg, var(--accent-soft) 0%, var(--panel-2) 100%);
+}
+
+.wf-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.wf-card-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.wf-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-card-radio {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1.5px solid var(--hairline-strong);
+  color: #fff;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.wf-card--selected .wf-card-radio {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wf-card-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.wf-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  font-size: 11px;
+  color: var(--text-3);
 }
 
 .workspace-path-input-group {
@@ -862,25 +1043,25 @@ h2 {
 }
 
 .workflow-run-summary-status--active {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--run-soft);
+  color: var(--run);
 }
 
 .workflow-run-summary-status--paused,
 .workflow-run-summary-status--blocked {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .workflow-run-summary-status--completed {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .workflow-run-summary-status--failed,
 .workflow-run-summary-status--cancelled {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--err-soft);
+  color: var(--err);
 }
 
 .workflow-run-summary-grid {
@@ -1079,23 +1260,23 @@ h2 {
 }
 
 .workflow-transport-status-chip--success {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--run-soft);
+  color: var(--run);
 }
 
 .workflow-transport-status-chip--warning {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 .workflow-transport-status-chip--danger {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--err-soft);
+  color: var(--err);
 }
 
 .workflow-transport-status-chip--neutral {
-  background: #e5e7eb;
-  color: #374151;
+  background: var(--raised);
+  color: var(--text-2);
 }
 
 .workflow-transport-drawer {

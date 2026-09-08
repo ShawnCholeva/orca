@@ -338,7 +338,7 @@ describe("TemplateDetail", () => {
 
   // ── Output schema validity gates Save ─────────────────────────────────────
 
-  it("Save Changes is disabled while output schema text is invalid, re-enables when fixed", async () => {
+  it("Save Changes is disabled while the output schema is invalid, re-enables when fixed", async () => {
     render(
       <TemplateDetail
         template={makeTemplate()}
@@ -361,16 +361,16 @@ describe("TemplateDetail", () => {
 
     // Expand the first step's details to reveal its Output Schema editor
     fireEvent.click(screen.getAllByRole("button", { name: /details/i })[0]);
-    const schemaField = screen.getByLabelText("Output Schema");
+    const nameField = screen.getByLabelText("Field 1 name");
 
-    // Type unparseable schema text → Save disabled
-    fireEvent.change(schemaField, { target: { value: "a {" } });
+    // Blank a field name → Save disabled
+    fireEvent.change(nameField, { target: { value: "" } });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled(),
     );
 
-    // Fix the text → Save re-enabled (still dirty from the rename)
-    fireEvent.change(schemaField, { target: { value: "a" } });
+    // Name it again → Save re-enabled (still dirty from the rename)
+    fireEvent.change(nameField, { target: { value: "a" } });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /save changes/i })).not.toBeDisabled(),
     );
@@ -466,7 +466,7 @@ describe("TemplateDetail", () => {
     expect(onCreated).toHaveBeenCalledWith(created);
   });
 
-  it("draft create: Create workflow is disabled while output schema text is invalid", async () => {
+  it("draft create: Create workflow is disabled while the output schema is invalid", async () => {
     const draft = makeTemplate({
       id: "draft/new",
       name: "Untitled workflow",
@@ -488,16 +488,16 @@ describe("TemplateDetail", () => {
 
     // Expand first step's details to reveal the Output Schema editor
     fireEvent.click(screen.getAllByRole("button", { name: /details/i })[0]);
-    const schemaField = screen.getByLabelText("Output Schema");
+    const nameField = screen.getByLabelText("Field 1 name");
 
-    // Type unparseable schema text → Create workflow should be disabled
-    fireEvent.change(schemaField, { target: { value: "a {" } });
+    // Blank a field name → Create workflow should be disabled
+    fireEvent.change(nameField, { target: { value: "" } });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /create workflow/i })).toBeDisabled(),
     );
 
-    // Fix the text → Create workflow should re-enable
-    fireEvent.change(schemaField, { target: { value: "a" } });
+    // Name it again → Create workflow should re-enable
+    fireEvent.change(nameField, { target: { value: "a" } });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /create workflow/i })).not.toBeDisabled(),
     );

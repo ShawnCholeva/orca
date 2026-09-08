@@ -24,6 +24,7 @@ type RoughState = {
   title: string;
   intent: string;
   successCriteria: string[];
+  pendingDocuments: PendingDocument[];
   error?: string;
 };
 
@@ -37,6 +38,18 @@ type CoordinateState = {
   orchestratorModel: OrchestratorModelChoice | null;
   workflowTemplateId: string | null;
   inspecting?: boolean;
+  error?: string;
+};
+
+type WorkflowState = {
+  phase: "workflow";
+  title: string;
+  intent: string;
+  successCriteria: string[];
+  pendingWorkspaces: PendingWorkspace[];
+  pendingDocuments: PendingDocument[];
+  orchestratorModel: OrchestratorModelChoice | null;
+  workflowTemplateId: string | null;
   error?: string;
 };
 
@@ -78,6 +91,7 @@ type DoneState = {
 export type FlowState =
   | RoughState
   | CoordinateState
+  | WorkflowState
   | SubmittingState
   | WorkflowFailedState
   | DoneState;
@@ -87,6 +101,7 @@ export const initialState: FlowState = {
   title: "",
   intent: "",
   successCriteria: [""],
+  pendingDocuments: [],
 };
 
 export type FlowAction =
@@ -103,7 +118,8 @@ export type FlowAction =
   | { type: "inspectSucceeded"; preview: InspectWorkspacePreview; inputPath: string; name: string }
   | { type: "inspectFailed"; error: string }
   | { type: "removePending"; index: number }
-  | { type: "editPendingName"; index: number; name: string }
+  | { type: "proceedToWorkflow" }
+  | { type: "backToCoordinate" }
   | { type: "addDocument"; document: PendingDocument }
   | { type: "removeDocument"; index: number }
   | { type: "submitRequested" }
@@ -157,7 +173,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           intent: state.intent,
           successCriteria: state.successCriteria,
           pendingWorkspaces: [],
-          pendingDocuments: [],
+          pendingDocuments: state.pendingDocuments,
           orchestratorModel: null,
           workflowTemplateId: null,
         };
@@ -171,6 +187,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
           title: state.title,
           intent: state.intent,
           successCriteria: state.successCriteria,
+          pendingDocuments: state.pendingDocuments,
         };
       }
       return state;
@@ -182,7 +199,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       return state;
 
     case "setWorkflowTemplateId":
-      if (state.phase === "coordinate") {
+      if (state.phase === "workflow") {
         return { ...state, workflowTemplateId: action.workflowTemplateId };
       }
       return state;
@@ -227,17 +244,38 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       }
       return state;
 
-    case "editPendingName":
+    case "proceedToWorkflow":
       if (state.phase === "coordinate") {
-        const pendingWorkspaces = state.pendingWorkspaces.map((ws, i) =>
-          i === action.index ? { ...ws, name: action.name } : ws,
-        );
-        return { ...state, pendingWorkspaces };
+        return {
+          phase: "workflow",
+          title: state.title,
+          intent: state.intent,
+          successCriteria: state.successCriteria,
+          pendingWorkspaces: state.pendingWorkspaces,
+          pendingDocuments: state.pendingDocuments,
+          orchestratorModel: state.orchestratorModel,
+          workflowTemplateId: state.workflowTemplateId,
+        };
+      }
+      return state;
+
+    case "backToCoordinate":
+      if (state.phase === "workflow") {
+        return {
+          phase: "coordinate",
+          title: state.title,
+          intent: state.intent,
+          successCriteria: state.successCriteria,
+          pendingWorkspaces: state.pendingWorkspaces,
+          pendingDocuments: state.pendingDocuments,
+          orchestratorModel: state.orchestratorModel,
+          workflowTemplateId: state.workflowTemplateId,
+        };
       }
       return state;
 
     case "addDocument":
-      if (state.phase === "coordinate") {
+      if (state.phase === "rough") {
         return {
           ...state,
           error: undefined,
@@ -247,7 +285,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       return state;
 
     case "removeDocument":
-      if (state.phase === "coordinate") {
+      if (state.phase === "rough") {
         return {
           ...state,
           pendingDocuments: state.pendingDocuments.filter((_, i) => i !== action.index),
@@ -256,7 +294,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
       return state;
 
     case "submitRequested":
-      if (state.phase === "coordinate") {
+      if (state.phase === "workflow") {
         return {
           phase: "submitting",
           title: state.title,
@@ -279,7 +317,7 @@ export function reducer(state: FlowState, action: FlowAction): FlowState {
     case "submitFailed":
       if (state.phase === "submitting") {
         return {
-          phase: "coordinate",
+          phase: "workflow",
           title: state.title,
           intent: state.intent,
           successCriteria: state.successCriteria,
