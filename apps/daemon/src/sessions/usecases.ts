@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import type Database from 'better-sqlite3';
 import { SessionDetail } from '@orca/contracts';
-import type { DomainEvent, SessionOutputSnapshot, SessionSummary } from '@orca/contracts';
+import type { DomainEvent, ResolvedModelChoice, SessionOutputSnapshot, SessionSummary } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import {
@@ -22,6 +22,7 @@ import {
   WorkspaceUnavailableError,
 } from './errors.js';
 import { getSessionDetail, insertSession, listSessionsByGoal } from './projection.js';
+import { modelChoiceToRow } from './model-choice.js';
 import { getContextPackageMetaById } from '../context/projection.js';
 import { getTaskById } from '../tasks/projection.js';
 import { getRecommendationById } from '../recommendations/projection.js';
@@ -99,9 +100,10 @@ export async function createSession(
     role?: string;
     instruction?: string;
     title?: string;
+    model?: ResolvedModelChoice;
   }
 ): Promise<SessionDetail> {
-  const { goalId, workspaceId, adapterId, contextPackageId, taskId, fromRecommendationId, role, instruction, title } = input;
+  const { goalId, workspaceId, adapterId, contextPackageId, taskId, fromRecommendationId, role, instruction, title, model } = input;
   const stmts = ensureStmts(ctx.db);
 
   // Validate goal
@@ -160,6 +162,8 @@ export async function createSession(
   let event!: DomainEvent;
   let assocEvent: DomainEvent | undefined;
 
+  const modelRow = modelChoiceToRow(model);
+
   ctx.db.transaction(() => {
     insertSession(ctx.db, {
       id: sessionId,
@@ -174,6 +178,9 @@ export async function createSession(
       title: resolvedTitle,
       status: 'created',
       createdAt: now,
+      modelId: modelRow.model_id,
+      contextVariant: modelRow.context_variant,
+      effort: modelRow.effort,
     });
 
     const eventId = randomUUID();

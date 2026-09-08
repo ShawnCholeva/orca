@@ -34,6 +34,9 @@ interface SessionRow {
   latest_extraction_failure_code: string | null;
   latest_extraction_truncated: number | null;
   latest_summary_headline: string | null;
+  model_id: string | null;
+  context_variant: string | null;
+  effort: string | null;
 }
 
 export interface InsertSessionRow {
@@ -49,12 +52,16 @@ export interface InsertSessionRow {
   title: string;
   status: string;
   createdAt: string;
+  modelId?: string | null;
+  contextVariant?: string | null;
+  effort?: string | null;
 }
 
 const SESSION_COLS = `s.id, s.goal_id, s.workspace_id, s.adapter_id, s.context_package_id, s.task_id, s.from_recommendation_id,
   s.role, s.instruction, s.title, s.status, s.pid,
   s.command, s.args_json, s.cwd, s.terminal_cols, s.terminal_rows, s.exit_code, s.exit_signal,
   s.failure_reason, s.failure_detail, s.created_at, s.started_at, s.exited_at, s.archived_at,
+  s.model_id, s.context_variant, s.effort,
   latest_extraction.id AS latest_extraction_id,
   latest_extraction.status AS latest_extraction_status,
   latest_extraction.requested_at AS latest_extraction_requested_at,
@@ -165,8 +172,8 @@ function ensureStmts(db: Database.Database): NonNullable<typeof _stmts> {
     _db = db;
     _stmts = {
       insertSession: db.prepare(
-        `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, context_package_id, task_id, from_recommendation_id, role, instruction, title, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, context_package_id, task_id, from_recommendation_id, role, instruction, title, status, created_at, model_id, context_variant, effort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ),
       listByGoal: db.prepare(
         `SELECT ${SESSION_COLS} ${SESSION_FROM} WHERE s.goal_id = ? ORDER BY s.created_at DESC, s.id ASC`
@@ -198,7 +205,10 @@ export function insertSession(db: Database.Database, row: InsertSessionRow): voi
     row.instruction ?? null,
     row.title,
     row.status,
-    row.createdAt
+    row.createdAt,
+    row.modelId ?? null,
+    row.contextVariant ?? null,
+    row.effort ?? null
   );
 }
 
@@ -213,6 +223,19 @@ export function getSessionDetail(db: Database.Database, sessionId: string): Sess
   const row = stmts.getById.get(sessionId) as SessionRow | undefined;
   if (!row) return null;
   return rowToDetail(row);
+}
+
+// The model columns are not part of the SessionDetail contract (they are an
+// internal dispatch detail, not something callers of the API need to see), so
+// they are read here directly off the row rather than through rowToDetail.
+export function getSessionModelRow(
+  db: Database.Database,
+  sessionId: string
+): { model_id: string | null; context_variant: string | null; effort: string | null } | null {
+  const stmts = ensureStmts(db);
+  const row = stmts.getById.get(sessionId) as SessionRow | undefined;
+  if (!row) return null;
+  return { model_id: row.model_id, context_variant: row.context_variant, effort: row.effort };
 }
 
 // Updates status and any provided optional fields.

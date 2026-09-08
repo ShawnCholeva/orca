@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { access } from 'node:fs/promises';
 import type Database from 'better-sqlite3';
-import type { DomainEvent, DomainEventType } from '@orca/contracts';
+import type { AdapterId, DomainEvent, DomainEventType } from '@orca/contracts';
 import type { EventBus } from '../events.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type { AdapterContextDelivery } from '../adapters/types.js';
 import { noopSandbox } from '../adapters/sandbox.js';
 import type { PtyEvents, PtyHandle, PtyManager } from '../pty/types.js';
-import { getSessionDetail, setSessionStatus } from './projection.js';
+import { getSessionDetail, getSessionModelRow, setSessionStatus } from './projection.js';
+import { modelChoiceFromRow } from './model-choice.js';
 import type { SessionOutputStore } from './output-store.js';
 import {
   CommandNotFoundError,
@@ -252,6 +253,9 @@ export class SessionRuntime {
       persistFailure(db, bus, sessionId, session.goalId, 'command_not_found', now, onTerminalState);
       throw new CommandNotFoundError(session.adapterId);
     }
+    const modelRow = getSessionModelRow(db, sessionId);
+    const model = modelRow ? modelChoiceFromRow(session.adapterId as AdapterId, modelRow) : undefined;
+
     let spawnResult: { command: string; args: string[]; env: Record<string, string>; cwd: string };
     try {
       spawnResult = await adapter.resolveSpawn({
@@ -260,6 +264,7 @@ export class SessionRuntime {
         workspacePath: wsRow.path,
         role: session.role ?? undefined,
         instruction: session.instruction ?? undefined,
+        model,
       });
     } catch {
       persistFailure(db, bus, sessionId, session.goalId, 'command_not_found', now, onTerminalState);
