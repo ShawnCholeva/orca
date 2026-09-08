@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CatalogModel, CreateWorkflowTemplateRequest } from "@orca/contracts";
-import { getModelCatalog, type ModelCatalogProfile } from "../api";
+import type { ModelCatalogProfile } from "../api";
 import { ModelPicker } from "./ModelPicker";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
 import { CloseIcon, PlusIcon } from "./icons";
@@ -12,6 +12,12 @@ export interface StepListEditorProps {
   onChange: (next: WorkflowStepDraft[]) => void;
   disabled?: boolean;
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
+  // Fetched once by the parent (TemplateDetail) and shared with NodeDetailModal
+  // rather than fetched per surface. A fetch failure degrades to an empty
+  // catalog — Instructions and Output schema stay usable either way.
+  catalog: CatalogModel[];
+  profiles: ModelCatalogProfile[];
+  catalogLoading?: boolean;
 }
 
 // ── Drag icon (6-dot grid) ────────────────────────────────────────────────────
@@ -81,38 +87,15 @@ export function StepEditor({
   onChange,
   disabled = false,
   onOutputSchemaValidityChange,
+  catalog,
+  profiles,
+  catalogLoading = false,
 }: StepListEditorProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   // Track step ids whose output-schema text is currently invalid. Keyed by id
   // (not index) so reorder/removal can't leave a stale entry behind.
   const [invalidStepIds, setInvalidStepIds] = useState<Set<string>>(() => new Set());
   const dragIdx = useRef<number | null>(null);
-
-  // Fetched once for the whole step list, not per row's picker. A fetch
-  // failure degrades to an empty catalog rather than blanking the editor —
-  // Instructions and Output schema stay usable either way.
-  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
-  const [catalogProfiles, setCatalogProfiles] = useState<ModelCatalogProfile[]>([]);
-  const [catalogLoading, setCatalogLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    getModelCatalog()
-      .then((response) => {
-        if (cancelled) return;
-        setCatalogModels(response.adapters.flatMap((a) => a.models));
-        setCatalogProfiles(response.profiles);
-      })
-      .catch(() => {
-        // non-fatal — the model picker just offers no choices until a refresh
-      })
-      .finally(() => {
-        if (!cancelled) setCatalogLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Report aggregate validity upward; prune ids for steps that no longer exist.
   useEffect(() => {
@@ -422,8 +405,8 @@ export function StepEditor({
                   <div role="group" aria-label={`Step ${i + 1} model`}>
                     <ModelPicker
                       value={step.agentPreference[0]}
-                      catalog={catalogModels}
-                      profiles={catalogProfiles}
+                      catalog={catalog}
+                      profiles={profiles}
                       onChange={(next) =>
                         updateStep(i, { agentPreference: [next, ...step.agentPreference.slice(1)] })
                       }

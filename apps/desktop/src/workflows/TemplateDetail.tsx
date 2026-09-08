@@ -1,13 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CreateWorkflowTemplateRequest,
+  type CatalogModel,
   type CreateWorkflowTemplateRequest as CreateWorkflowTemplateInput,
   type WorkflowGraph,
   type WorkflowGraphNode,
   type WorkflowScope,
   type WorkflowTemplate,
 } from "@orca/contracts";
-import { toErrorMessage } from "../api";
+import { getModelCatalog, toErrorMessage, type ModelCatalogProfile } from "../api";
 import { createTemplate, duplicateTemplate, saveTemplate } from "./api";
 import { LockIcon } from "./icons";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
@@ -133,6 +134,33 @@ export function TemplateDetail({
   // True while any on-screen output-schema text is unparseable. Gates Save so
   // we never silently persist the last valid schema over visibly-invalid text.
   const [schemaInvalid, setSchemaInvalid] = useState(false);
+
+  // Fetched once here rather than per surface — both StepEditor (list view)
+  // and NodeDetailModal (canvas view) share the same catalog/profiles. A
+  // fetch failure degrades to an empty catalog rather than blanking either
+  // surface; ModelPicker disables its controls and explains itself.
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
+  const [catalogProfiles, setCatalogProfiles] = useState<ModelCatalogProfile[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getModelCatalog()
+      .then((response) => {
+        if (cancelled) return;
+        setCatalogModels(response.adapters.flatMap((a) => a.models));
+        setCatalogProfiles(response.profiles);
+      })
+      .catch(() => {
+        // non-fatal — the model pickers just offer no choices until a refresh
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Materialize the graph: reconcile steps into the working graph
   const materializedGraph = useMemo(
@@ -366,6 +394,7 @@ export function TemplateDetail({
         instructions: step.instructions,
         outputSchema: step.outputSchema,
         terminal: node.terminal ?? false,
+        agentPreference: step.agentPreference,
         onChange: (patch) => {
           setDraft((current) => {
             const nextSteps = current.steps.map((s) =>
@@ -396,6 +425,8 @@ export function TemplateDetail({
         kind: "gate",
         name: node.name,
         instructions: node.instructions ?? node.condition ?? "",
+        agentPreference: node.agentPreference,
+        evalSubstrate: node.evalSubstrate,
         onChange: (patch) => {
           setDraft((current) => ({
             ...current,
@@ -627,6 +658,9 @@ export function TemplateDetail({
             }
             disabled={locked}
             onOutputSchemaValidityChange={setSchemaInvalid}
+            catalog={catalogModels}
+            profiles={catalogProfiles}
+            catalogLoading={catalogLoading}
           />
         ) : (
           <WorkflowFlow
@@ -668,6 +702,9 @@ export function TemplateDetail({
           }}
           readOnly={locked}
           onOutputSchemaValidityChange={setSchemaInvalid}
+          catalog={catalogModels}
+          profiles={catalogProfiles}
+          catalogLoading={catalogLoading}
         />
       )}
     </section>

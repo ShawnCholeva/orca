@@ -110,10 +110,20 @@ describe("WorkflowsPage", () => {
     expect(within(sidebarContainer as HTMLElement).getByText("Global Wf")).toBeInTheDocument();
     expect(within(sidebarContainer as HTMLElement).getByText("Workspace Wf")).toBeInTheDocument();
 
+    // The filter change below selects a different template, remounting
+    // TemplateDetail (key={selected.id}) and firing its own model-catalog
+    // fetch — track the pre-click call count and wait for it to settle so the
+    // state update lands inside this test's act(), not later.
+    const callsBeforeFilter = getModelCatalogMock.mock.calls.length;
+
     // Click "Workspace" filter (the button in the sidebar)
     fireEvent.click(within(sidebarContainer as HTMLElement).getByRole("button", { name: /workspace/i }));
     expect(within(sidebarContainer as HTMLElement).queryByText("Global Wf")).toBeNull();
     expect(within(sidebarContainer as HTMLElement).getByText("Workspace Wf")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(getModelCatalogMock.mock.calls.length).toBeGreaterThan(callsBeforeFilter),
+    );
   });
 
   it("duplicates the built-in template into a custom copy", async () => {

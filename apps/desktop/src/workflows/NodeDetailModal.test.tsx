@@ -1,11 +1,27 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { WorkflowStepOutputSchema } from "@orca/contracts";
+import type { CatalogModel, NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
+import type { ModelCatalogProfile } from "../api";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
 
 const schema: WorkflowStepOutputSchema = [
   { key: "summary", type: "string", required: true },
 ];
+
+const AGENT_PREFERENCE: NodeModelSelection[] = [
+  { kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null },
+];
+
+const CATALOG: CatalogModel[] = [
+  { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
+    supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
+    supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" },
+  { id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
+    supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" },
+];
+
+const PROFILES: ModelCatalogProfile[] = [{ id: "reasoning", displayName: "Reasoning" }];
 
 function makeGateDetail(
   onChange = vi.fn(),
@@ -26,6 +42,7 @@ function makeStepDetail(
     name: "Research",
     instructions: "Investigate the codebase.",
     outputSchema: schema,
+    agentPreference: AGENT_PREFERENCE,
     onChange,
   };
 }
@@ -298,7 +315,7 @@ it("toggles a step terminal flag", () => {
   const onChange = vi.fn();
   render(
     <NodeDetailModal
-      detail={{ kind: "step", name: "Done", instructions: "", outputSchema: [], terminal: false, onChange }}
+      detail={{ kind: "step", name: "Done", instructions: "", outputSchema: [], terminal: false, agentPreference: AGENT_PREFERENCE, onChange }}
       index={0} total={1} onPrev={null} onNext={null} onClose={() => {}} onDelete={() => {}}
     />
   );
@@ -330,4 +347,81 @@ it("edits splitter instructions", () => {
   render(<NodeDetailModal detail={makeSplitterDetail(onChange)} index={0} total={3} onPrev={null} onNext={vi.fn()} onClose={vi.fn()} onDelete={vi.fn()} />);
   fireEvent.change(screen.getByPlaceholderText(/route to/i), { target: { value: "If vague, go clarify" } });
   expect(onChange).toHaveBeenCalledWith({ instructions: "If vague, go clarify" });
+});
+
+describe("NodeDetailModal — model picker", () => {
+  it("a step node renders the picker", () => {
+    render(
+      <NodeDetailModal
+        detail={makeStepDetail()}
+        index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
+        catalog={CATALOG} profiles={PROFILES}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "Step model" })).toBeDefined();
+  });
+
+  it("a gate node with evalSubstrate 'worker' renders the picker", () => {
+    render(
+      <NodeDetailModal
+        detail={{ ...makeGateDetail(), agentPreference: AGENT_PREFERENCE, evalSubstrate: "worker" }}
+        index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
+        catalog={CATALOG} profiles={PROFILES}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "Gate model" })).toBeDefined();
+  });
+
+  it("a gate node with evalSubstrate 'shadow' does NOT render the picker", () => {
+    render(
+      <NodeDetailModal
+        detail={{ ...makeGateDetail(), evalSubstrate: "shadow" }}
+        index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
+        catalog={CATALOG} profiles={PROFILES}
+      />,
+    );
+    expect(screen.queryByRole("group", { name: "Gate model" })).toBeNull();
+  });
+
+  it("a splitter node does NOT render the picker", () => {
+    render(
+      <NodeDetailModal
+        detail={makeSplitterDetail()}
+        index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
+        catalog={CATALOG} profiles={PROFILES}
+      />,
+    );
+    expect(screen.queryByLabelText("Model")).toBeNull();
+  });
+
+  it("changing the model calls onChange with the new agentPreference and preserves entries behind the primary choice", () => {
+    const onChange = vi.fn();
+    const fallback: NodeModelSelection = { kind: "pinned", adapterId: "codex", modelId: "gpt-5", contextVariant: "default", effort: null };
+    const detail = makeStepDetail(onChange);
+    render(
+      <NodeDetailModal
+        detail={{ ...detail, agentPreference: [AGENT_PREFERENCE[0], fallback] }}
+        index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
+        catalog={CATALOG} profiles={PROFILES}
+      />,
+    );
+    const group = screen.getByRole("group", { name: "Step model" });
+    fireEvent.change(within(group).getByLabelText("Model"), { target: { value: "claude-opus-5::default" } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const patch = onChange.mock.calls[0][0];
+    expect(patch.agentPreference[0]).toMatchObject({ modelId: "claude-opus-5", contextVariant: "default" });
+    expect(patch.agentPreference[1]).toEqual(fallback);
+  });
+
+  it("readOnly disables the picker", () => {
+    render(
+      <NodeDetailModal
+        detail={makeStepDetail()}
+        index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
+        catalog={CATALOG} profiles={PROFILES} readOnly
+      />,
+    );
+    const group = screen.getByRole("group", { name: "Step model" });
+    expect((within(group).getByLabelText("Model") as HTMLSelectElement).disabled).toBe(true);
+  });
 });

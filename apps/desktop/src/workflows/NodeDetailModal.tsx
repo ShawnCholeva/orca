@@ -1,7 +1,20 @@
 import { useEffect } from "react";
-import type { WorkflowStepOutputSchema } from "@orca/contracts";
+import type { CatalogModel, NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
+import type { ModelCatalogProfile } from "../api";
 import { GateGlyph, SplitterGlyph, CloseIcon, ChevronLeftIcon, ChevronRightIcon } from "./icons";
+import { ModelPicker } from "./ModelPicker";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
+
+// Falls back to this when a gate has never had a model chosen (gates aren't
+// created with an agentPreference the way steps are — see TemplateDetail's
+// handleAddNode). Mirrors StepEditor's createStepDraft default.
+const DEFAULT_AGENT_PREFERENCE: NodeModelSelection = {
+  kind: "pinned",
+  adapterId: "claude-code",
+  modelId: "claude-haiku-4-5",
+  contextVariant: "default",
+  effort: null,
+};
 
 export type NodeDetail =
   | {
@@ -10,18 +23,26 @@ export type NodeDetail =
       instructions: string;
       outputSchema: WorkflowStepOutputSchema;
       terminal?: boolean;
+      agentPreference: NodeModelSelection[];
       onChange: (patch: {
         name?: string;
         instructions?: string;
         outputSchema?: WorkflowStepOutputSchema;
         terminal?: boolean;
+        agentPreference?: NodeModelSelection[];
       }) => void;
     }
   | {
       kind: "gate";
       name: string;
       instructions: string;
-      onChange: (patch: { name?: string; instructions?: string }) => void;
+      agentPreference?: NodeModelSelection[];
+      evalSubstrate?: "shadow" | "worker";
+      onChange: (patch: {
+        name?: string;
+        instructions?: string;
+        agentPreference?: NodeModelSelection[];
+      }) => void;
     }
   | {
       kind: "splitter";
@@ -41,6 +62,9 @@ export interface NodeDetailModalProps {
   onDelete: () => void;
   readOnly?: boolean;
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
+  catalog?: CatalogModel[];
+  profiles?: ModelCatalogProfile[];
+  catalogLoading?: boolean;
 }
 
 export function NodeDetailModal({
@@ -53,6 +77,9 @@ export function NodeDetailModal({
   onDelete,
   readOnly = false,
   onOutputSchemaValidityChange,
+  catalog = [],
+  profiles = [],
+  catalogLoading = false,
 }: NodeDetailModalProps) {
   const isGate = detail.kind === "gate";
   const isSplitter = detail.kind === "splitter";
@@ -186,7 +213,13 @@ export function NodeDetailModal({
           }}
         >
           {isGate ? (
-            <GateBody detail={detail as Extract<NodeDetail, { kind: "gate" }>} readOnly={readOnly} />
+            <GateBody
+              detail={detail as Extract<NodeDetail, { kind: "gate" }>}
+              readOnly={readOnly}
+              catalog={catalog}
+              profiles={profiles}
+              catalogLoading={catalogLoading}
+            />
           ) : isSplitter ? (
             <SplitterBody detail={detail as Extract<NodeDetail, { kind: "splitter" }>} readOnly={readOnly} />
           ) : (
@@ -194,6 +227,9 @@ export function NodeDetailModal({
               detail={detail as Extract<NodeDetail, { kind: "step" }>}
               readOnly={readOnly}
               onOutputSchemaValidityChange={onOutputSchemaValidityChange}
+              catalog={catalog}
+              profiles={profiles}
+              catalogLoading={catalogLoading}
             />
           )}
         </div>
@@ -227,7 +263,19 @@ export function NodeDetailModal({
   );
 }
 
-function GateBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "gate" }>; readOnly?: boolean }) {
+function GateBody({
+  detail,
+  readOnly,
+  catalog,
+  profiles,
+  catalogLoading,
+}: {
+  detail: Extract<NodeDetail, { kind: "gate" }>;
+  readOnly?: boolean;
+  catalog: CatalogModel[];
+  profiles: ModelCatalogProfile[];
+  catalogLoading?: boolean;
+}) {
   return (
     <div>
       <div
@@ -264,6 +312,37 @@ function GateBody({ detail, readOnly }: { detail: Extract<NodeDetail, { kind: "g
           boxSizing: "border-box",
         }}
       />
+
+      {detail.evalSubstrate === "worker" && (
+        <div style={{ marginTop: 16 }}>
+          <div
+            className="mono"
+            style={{
+              fontSize: 10,
+              color: "var(--text-3)",
+              textTransform: "uppercase",
+              letterSpacing: 1.2,
+              marginBottom: 6,
+            }}
+          >
+            Model
+          </div>
+          <div role="group" aria-label="Gate model">
+            <ModelPicker
+              value={detail.agentPreference?.[0] ?? DEFAULT_AGENT_PREFERENCE}
+              catalog={catalog}
+              profiles={profiles}
+              onChange={(next) =>
+                detail.onChange({
+                  agentPreference: [next, ...(detail.agentPreference ?? []).slice(1)],
+                })
+              }
+              disabled={readOnly || catalogLoading}
+            />
+          </div>
+        </div>
+      )}
+
       <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 8, lineHeight: 1.5 }}>
         The gate routes work through fixed <strong>approved</strong> or <strong>rejected</strong> ports.
         Provide routing criteria; the orchestrator records a decision with justification before advancing.
@@ -405,10 +484,16 @@ function StepBody({
   detail,
   readOnly,
   onOutputSchemaValidityChange,
+  catalog,
+  profiles,
+  catalogLoading,
 }: {
   detail: Extract<NodeDetail, { kind: "step" }>;
   readOnly?: boolean;
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
+  catalog: CatalogModel[];
+  profiles: ModelCatalogProfile[];
+  catalogLoading?: boolean;
 }) {
   return (
     <>
@@ -447,6 +532,32 @@ function StepBody({
             boxSizing: "border-box",
           }}
         />
+      </div>
+
+      <div>
+        <div
+          className="mono"
+          style={{
+            fontSize: 10,
+            color: "var(--text-3)",
+            textTransform: "uppercase",
+            letterSpacing: 1.2,
+            marginBottom: 6,
+          }}
+        >
+          Model
+        </div>
+        <div role="group" aria-label="Step model">
+          <ModelPicker
+            value={detail.agentPreference[0]}
+            catalog={catalog}
+            profiles={profiles}
+            onChange={(next) =>
+              detail.onChange({ agentPreference: [next, ...detail.agentPreference.slice(1)] })
+            }
+            disabled={readOnly || catalogLoading}
+          />
+        </div>
       </div>
 
       <OutputSchemaEditor

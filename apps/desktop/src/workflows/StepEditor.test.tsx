@@ -1,5 +1,7 @@
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import type { CatalogModel } from "@orca/contracts";
+import type { ModelCatalogProfile } from "../api";
 import { StepEditor, type WorkflowStepDraft } from "./StepEditor";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -7,38 +9,16 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
-const getModelCatalogMock = vi.fn();
-vi.mock("../api", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../api")>();
-  return {
-    ...mod,
-    getModelCatalog: (...args: unknown[]) => getModelCatalogMock(...args),
-  };
-});
+const CATALOG: CatalogModel[] = [
+  { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
+    supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
+    supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" },
+  { id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
+    supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" },
+];
 
-const CATALOG_RESPONSE = {
-  adapters: [
-    {
-      adapterId: "claude-code" as const,
-      adapterVersion: "2.1.263",
-      source: "extracted" as const,
-      models: [
-        { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
-          supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
-          supportedEfforts: ["low", "medium", "high"] as const, defaultEffort: "medium" as const },
-        { id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
-          supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
-          supportedEfforts: ["low", "medium", "high", "xhigh", "max"] as const, defaultEffort: "high" as const },
-      ],
-    },
-  ],
-  profiles: [{ id: "reasoning", displayName: "Reasoning" }],
-};
-
-const EMPTY_CATALOG_RESPONSE = {
-  adapters: [{ adapterId: "claude-code" as const, adapterVersion: null, source: "seed" as const, models: [] }],
-  profiles: [],
-};
+const PROFILES: ModelCatalogProfile[] = [{ id: "reasoning", displayName: "Reasoning" }];
 
 function makeStep(id: string, name: string): WorkflowStepDraft {
   return {
@@ -64,31 +44,16 @@ const baseSteps: WorkflowStepDraft[] = [
   makeStep("step-2", "Implement"),
 ];
 
-// Renders and waits for the (mocked) catalog fetch to settle, so the
-// component's post-mount state update happens inside this awaited flush
-// rather than leaking into a later, unrelated act() — the fetch fires on
-// every mount regardless of whether a row is expanded.
-async function renderSettled(...args: Parameters<typeof render>) {
-  const utils = render(...args);
-  await waitFor(() => expect(getModelCatalogMock).toHaveBeenCalled());
-  return utils;
-}
-
 describe("StepEditor", () => {
-  beforeEach(() => {
-    getModelCatalogMock.mockReset();
-    getModelCatalogMock.mockResolvedValue(CATALOG_RESPONSE);
-  });
-
-  it("renders a row per step with its name", async () => {
-    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+  it("renders a row per step with its name", () => {
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
     expect(screen.getByDisplayValue("Research")).toBeDefined();
     expect(screen.getByDisplayValue("Implement")).toBeDefined();
   });
 
-  it("editing a name input calls onChange with updated name", async () => {
+  it("editing a name input calls onChange with updated name", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
 
     const input = screen.getByDisplayValue("Research");
     fireEvent.change(input, { target: { value: "Research v2" } });
@@ -99,9 +64,9 @@ describe("StepEditor", () => {
     expect(next[1].name).toBe("Implement");
   });
 
-  it("Add step calls onChange with one more step (with default outputSchema)", async () => {
+  it("Add step calls onChange with one more step (with default outputSchema)", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
 
     fireEvent.click(screen.getByRole("button", { name: /add step/i }));
 
@@ -111,9 +76,9 @@ describe("StepEditor", () => {
     expect(next[2].outputSchema).toEqual([{ key: "result", type: "string", required: true }]);
   });
 
-  it("Remove calls onChange with that step gone", async () => {
+  it("Remove calls onChange with that step gone", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
 
     const removeBtns = screen.getAllByTitle("Remove step");
     fireEvent.click(removeBtns[0]);
@@ -124,9 +89,9 @@ describe("StepEditor", () => {
     expect(next[0].id).toBe("step-2");
   });
 
-  it("Move up reorders — first step of second row goes before first", async () => {
+  it("Move up reorders — first step of second row goes before first", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
 
     const moveUpBtns = screen.getAllByTitle("Move up");
     // Second step's "Move up"
@@ -138,9 +103,9 @@ describe("StepEditor", () => {
     expect(next[1].id).toBe("step-1");
   });
 
-  it("Move down reorders — first step moves to second position", async () => {
+  it("Move down reorders — first step moves to second position", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
 
     const moveDownBtns = screen.getAllByTitle("Move down");
     // First step's "Move down"
@@ -152,8 +117,8 @@ describe("StepEditor", () => {
     expect(next[1].id).toBe("step-1");
   });
 
-  it("expanding a row reveals instructions textarea and output schema editor", async () => {
-    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+  it("expanding a row reveals instructions textarea and output schema editor", () => {
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
 
     // Initially the detail panel is collapsed — no instructions textareas visible
     expect(screen.queryByLabelText("Step 1 instructions")).toBeNull();
@@ -167,9 +132,9 @@ describe("StepEditor", () => {
     expect(screen.getByText(/output schema/i)).toBeDefined();
   });
 
-  it("editing instructions calls onChange with updated value", async () => {
+  it("editing instructions calls onChange with updated value", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
 
     // Expand first row
     const detailBtns = screen.getAllByTitle("Edit details");
@@ -183,8 +148,8 @@ describe("StepEditor", () => {
     expect(next[0].instructions).toBe("Do the research.");
   });
 
-  it("disabled hides add/remove/move buttons and disables name inputs", async () => {
-    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} disabled />);
+  it("disabled hides add/remove/move buttons and disables name inputs", () => {
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} disabled catalog={CATALOG} profiles={PROFILES} />);
 
     expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
     expect(screen.queryByTitle("Remove step")).toBeNull();
@@ -197,11 +162,11 @@ describe("StepEditor", () => {
     }
   });
 
-  it("disabled still allows expanding to view details (read-only)", async () => {
+  it("disabled still allows expanding to view details (read-only)", () => {
     const stepWithInstructions: WorkflowStepDraft[] = [
       { ...makeStep("step-1", "Research"), instructions: "Gather data." },
     ];
-    await renderSettled(<StepEditor steps={stepWithInstructions} onChange={vi.fn()} disabled />);
+    render(<StepEditor steps={stepWithInstructions} onChange={vi.fn()} disabled catalog={CATALOG} profiles={PROFILES} />);
 
     const detailBtn = screen.getByTitle("Edit details");
     fireEvent.click(detailBtn);
@@ -211,16 +176,16 @@ describe("StepEditor", () => {
     expect(textarea.disabled).toBe(true);
   });
 
-  it("renders a model picker for a step", async () => {
-    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+  it("renders a model picker for a step", () => {
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
 
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
-    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const group = screen.getByRole("group", { name: "Step 1 model" });
     expect(within(group).getByLabelText("Model")).toBeDefined();
   });
 
-  it("choosing a different model updates agentPreference[0] and preserves the fallback entries behind it", async () => {
+  it("choosing a different model updates agentPreference[0] and preserves the fallback entries behind it", () => {
     const onChange = vi.fn();
     const stepWithFallback: WorkflowStepDraft[] = [
       {
@@ -233,10 +198,10 @@ describe("StepEditor", () => {
         ],
       },
     ];
-    await renderSettled(<StepEditor steps={stepWithFallback} onChange={onChange} />);
+    render(<StepEditor steps={stepWithFallback} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
 
     fireEvent.click(screen.getByTitle("Edit details"));
-    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const group = screen.getByRole("group", { name: "Step 1 model" });
     const modelSelect = within(group).getByLabelText("Model");
 
     fireEvent.change(modelSelect, { target: { value: "claude-opus-5::default" } });
@@ -247,12 +212,9 @@ describe("StepEditor", () => {
     expect(next[0].agentPreference[1]).toEqual(stepWithFallback[0].agentPreference[1]);
   });
 
-  it("still renders instructions and output schema when the catalog fetch rejects", async () => {
-    getModelCatalogMock.mockReset();
-    getModelCatalogMock.mockRejectedValue(new Error("network down"));
-
+  it("still renders instructions and output schema when the catalog is empty", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={[]} profiles={[]} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
     const textarea = screen.getByLabelText("Step 1 instructions");
@@ -261,15 +223,12 @@ describe("StepEditor", () => {
     expect(screen.getByText(/output schema/i)).toBeDefined();
   });
 
-  it("an empty model list disables the Pinned control, shows why, and never lets onChange emit an empty modelId", async () => {
-    getModelCatalogMock.mockReset();
-    getModelCatalogMock.mockResolvedValue(EMPTY_CATALOG_RESPONSE);
-
+  it("an empty model list disables the Pinned control, shows why, and never lets onChange emit an empty modelId", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={[]} profiles={PROFILES} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
-    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const group = screen.getByRole("group", { name: "Step 1 model" });
     const pinnedRadio = within(group).getByRole("radio", { name: /pinned model/i }) as HTMLInputElement;
     const modelSelect = within(group).getByLabelText("Model") as HTMLSelectElement;
 
@@ -286,25 +245,12 @@ describe("StepEditor", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("an empty profile list disables the Profile control and never lets onChange emit an empty ref", async () => {
-    getModelCatalogMock.mockReset();
-    getModelCatalogMock.mockResolvedValue({
-      adapters: [
-        {
-          adapterId: "claude-code" as const,
-          adapterVersion: "2.1.263",
-          source: "extracted" as const,
-          models: CATALOG_RESPONSE.adapters[0]!.models,
-        },
-      ],
-      profiles: [],
-    });
-
+  it("an empty profile list disables the Profile control and never lets onChange emit an empty ref", () => {
     const onChange = vi.fn();
-    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={[]} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
-    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const group = screen.getByRole("group", { name: "Step 1 model" });
     const profileRadio = within(group).getByRole("radio", { name: /^profile$/i }) as HTMLInputElement;
 
     expect(profileRadio.disabled).toBe(true);
@@ -316,11 +262,11 @@ describe("StepEditor", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("a populated catalog keeps both the Pinned and Profile controls enabled", async () => {
-    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+  it("a populated catalog keeps both the Pinned and Profile controls enabled", () => {
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
-    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const group = screen.getByRole("group", { name: "Step 1 model" });
     const pinnedRadio = within(group).getByRole("radio", { name: /pinned model/i }) as HTMLInputElement;
     const profileRadio = within(group).getByRole("radio", { name: /^profile$/i }) as HTMLInputElement;
     const modelSelect = within(group).getByLabelText("Model") as HTMLSelectElement;

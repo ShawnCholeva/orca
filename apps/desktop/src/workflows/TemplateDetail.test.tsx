@@ -29,6 +29,16 @@ vi.mock("../api", async (importOriginal) => {
 
 const now = "2026-01-01T00:00:00.000Z";
 
+// TemplateDetail fetches the model catalog once on mount (shared by StepEditor
+// and NodeDetailModal). Await it settling before asserting, so the post-mount
+// state update lands inside this awaited flush rather than leaking into a
+// later, unrelated act().
+async function renderSettled(...args: Parameters<typeof render>) {
+  const utils = render(...args);
+  await waitFor(() => expect(getModelCatalogMock).toHaveBeenCalled());
+  return utils;
+}
+
 function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTemplate {
   return {
     id: "custom/template-1",
@@ -97,8 +107,8 @@ describe("TemplateDetail", () => {
 
   // ── Locked / built-in ──────────────────────────────────────────────────────
 
-  it("shows read-only canvas for locked templates (no Save button)", () => {
-    render(
+  it("shows read-only canvas for locked templates (no Save button)", async () => {
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate({
           id: "orca/engineering",
@@ -119,8 +129,8 @@ describe("TemplateDetail", () => {
     expect(screen.getByRole("button", { name: /duplicate to custom/i })).toBeInTheDocument();
   });
 
-  it("locked canvas is read-only: no Add step / Add gate toolbar buttons", () => {
-    render(
+  it("locked canvas is read-only: no Add step / Add gate toolbar buttons", async () => {
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate({ isBuiltIn: true, isLocked: true })}
         onTemplateSaved={() => {}}
@@ -131,8 +141,8 @@ describe("TemplateDetail", () => {
     expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
   });
 
-  it("locked template shows a read-only notice pointing to Duplicate", () => {
-    render(
+  it("locked template shows a read-only notice pointing to Duplicate", async () => {
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate({ isBuiltIn: true, isLocked: true })}
         onTemplateSaved={() => {}}
@@ -142,8 +152,8 @@ describe("TemplateDetail", () => {
     expect(screen.getByText(/built-in workflow — read-only/i)).toBeTruthy();
   });
 
-  it("unlocked template shows no read-only notice", () => {
-    render(
+  it("unlocked template shows no read-only notice", async () => {
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate({ isBuiltIn: false, isLocked: false })}
         onTemplateSaved={() => {}}
@@ -155,8 +165,8 @@ describe("TemplateDetail", () => {
 
   // ── Unlocked custom in VIEW mode (canvas interactive) ─────────────────────
 
-  it("unlocked view mode: canvas is interactive (Add step / Add gate present)", () => {
-    render(
+  it("unlocked view mode: canvas is interactive (Add step / Add gate present)", async () => {
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate()}
         onTemplateSaved={() => {}}
@@ -168,8 +178,8 @@ describe("TemplateDetail", () => {
     expect(screen.getByRole("button", { name: /add gate/i })).toBeInTheDocument();
   });
 
-  it("unlocked view mode: Save Changes initially disabled (not dirty)", () => {
-    render(
+  it("unlocked view mode: Save Changes initially disabled (not dirty)", async () => {
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate()}
         onTemplateSaved={() => {}}
@@ -188,7 +198,7 @@ describe("TemplateDetail", () => {
       warnings: [],
     });
 
-    render(
+    await renderSettled(
       <TemplateDetail
         template={template}
         onTemplateSaved={() => {}}
@@ -224,7 +234,7 @@ describe("TemplateDetail", () => {
   });
 
   it("Discard changes reverts draft (Save Changes disabled again)", async () => {
-    render(
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate()}
         onTemplateSaved={() => {}}
@@ -257,7 +267,7 @@ describe("TemplateDetail", () => {
       warnings: [],
     });
 
-    render(
+    await renderSettled(
       <TemplateDetail
         template={template}
         onTemplateSaved={() => {}}
@@ -311,7 +321,7 @@ describe("TemplateDetail", () => {
       warnings: [],
     });
 
-    render(
+    await renderSettled(
       <TemplateDetail
         template={template}
         onTemplateSaved={() => {}}
@@ -344,8 +354,8 @@ describe("TemplateDetail", () => {
     expect(stepNodes.map((n) => n.stepId).sort()).toEqual(stepIds.sort());
   });
 
-  it("Edit/Done toggles the meta editor without reverting draft", () => {
-    render(
+  it("Edit/Done toggles the meta editor without reverting draft", async () => {
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate()}
         onTemplateSaved={() => {}}
@@ -366,7 +376,7 @@ describe("TemplateDetail", () => {
   // ── Output schema validity gates Save ─────────────────────────────────────
 
   it("Save Changes is disabled while the output schema is invalid, re-enables when fixed", async () => {
-    render(
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate()}
         onTemplateSaved={() => {}}
@@ -406,7 +416,7 @@ describe("TemplateDetail", () => {
   // ── Scope picker ──────────────────────────────────────────────────────────
 
   it("scope picker is shown in edit mode and goal options are passed", async () => {
-    render(
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate()}
         goalOptions={["Goal Alpha", "Goal Beta"]}
@@ -428,7 +438,7 @@ describe("TemplateDetail", () => {
   // ── Canvas node present in view mode ──────────────────────────────────────
 
   it("renders output schema fields for each step (via canvas node modal)", async () => {
-    render(
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate()}
         onTemplateSaved={() => {}}
@@ -448,7 +458,7 @@ describe("TemplateDetail", () => {
     const copy = makeTemplate({ id: "custom/template-1-copy", name: "Custom Delivery Copy" });
     duplicateTemplateMock.mockResolvedValue({ template: copy, warnings: [] });
 
-    render(
+    await renderSettled(
       <TemplateDetail
         template={template}
         onTemplateSaved={() => {}}
@@ -477,7 +487,7 @@ describe("TemplateDetail", () => {
     createTemplateMock.mockResolvedValue({ template: created, warnings: [] });
     const onCreated = vi.fn();
 
-    render(
+    await renderSettled(
       <TemplateDetail
         template={draft}
         isNew={true}
@@ -501,7 +511,7 @@ describe("TemplateDetail", () => {
       version: 0,
     });
 
-    render(
+    await renderSettled(
       <TemplateDetail
         template={draft}
         isNew={true}
@@ -533,7 +543,7 @@ describe("TemplateDetail", () => {
 
   it("draft create: Discard calls onDiscard", async () => {
     const onDiscard = vi.fn();
-    render(
+    await renderSettled(
       <TemplateDetail
         template={makeTemplate({ id: "draft/new", version: 0 })}
         isNew={true}
@@ -557,7 +567,7 @@ describe("TemplateDetail", () => {
       warnings: [],
     });
 
-    render(
+    await renderSettled(
       <TemplateDetail
         template={template}
         onTemplateSaved={() => {}}
