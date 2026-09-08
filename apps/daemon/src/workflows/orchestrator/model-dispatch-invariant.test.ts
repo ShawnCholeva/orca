@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ClaudeCodeAdapter } from "../../adapters/claude-code.js";
 import { SEED_PROFILES } from "../../adapters/model-catalog/profiles.js";
 import type { CatalogModel } from "../../adapters/model-catalog/types.js";
+import { dispatchModelString } from "./dispatch-engine.js";
 import { resolveStepDispatch } from "./step-dispatch.js";
 
 const CATALOG: CatalogModel[] = [
@@ -11,10 +12,14 @@ const CATALOG: CatalogModel[] = [
 ];
 
 /**
- * The model recorded against a step run must be the model in the command that
- * ran. Before this existed, dispatch resolved a model, wrote it to the database,
- * and spawned a CLI that read ~/.claude/settings.json instead — so every
- * model-attributed measurement described a model that never ran.
+ * The function that produces the value written to `selected_model_id`
+ * (`dispatchModelString`, called from dispatch-engine.ts's persistence paths)
+ * and the function that builds the launched CLI's spawn args
+ * (`ClaudeCodeAdapter.resolveSpawn` / `modelSpawnArgs`) must agree when fed the
+ * same resolved choice. Before this existed, dispatch resolved a model, wrote
+ * it to the database, and spawned a CLI that read ~/.claude/settings.json
+ * instead — so every model-attributed measurement described a model that
+ * never ran.
  */
 describe("recorded model == launched model", () => {
   it("agrees for a pinned 1m choice at an explicit effort", async () => {
@@ -26,9 +31,7 @@ describe("recorded model == launched model", () => {
       profiles: SEED_PROFILES,
     });
 
-    const recorded = dispatch.model.contextVariant === "1m"
-      ? `${dispatch.model.modelId}[1m]`
-      : dispatch.model.modelId;
+    const recorded = dispatchModelString(dispatch.model);
 
     const adapter = new ClaudeCodeAdapter(async () => ({ resolvedPath: "/bin/claude" }));
     const spawn = await adapter.resolveSpawn({
