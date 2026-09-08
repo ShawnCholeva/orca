@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
+import type { Agent, NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
 import type { CatalogEntry } from "./ModelPicker";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
@@ -23,6 +23,13 @@ const CATALOG: CatalogEntry[] = [
 ];
 
 const PROFILES: ModelCatalogProfile[] = [{ id: "reasoning", displayName: "Reasoning" }];
+
+const AGENTS: Agent[] = [
+  { id: "claude-code", name: "Claude Code", shortLabel: "", description: "", swatch: "#000", recommended: true,
+    connected: true, sortOrder: 10, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+  { id: "codex", name: "Codex CLI", shortLabel: "", description: "", swatch: "#000", recommended: true,
+    connected: true, sortOrder: 20, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+];
 
 function makeGateDetail(
   onChange = vi.fn(),
@@ -356,10 +363,23 @@ describe("NodeDetailModal — model picker", () => {
       <NodeDetailModal
         detail={makeStepDetail()}
         index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
-        catalog={CATALOG} profiles={PROFILES}
+        catalog={CATALOG} profiles={PROFILES} agents={AGENTS}
       />,
     );
     expect(screen.getByRole("group", { name: "Step model" })).toBeDefined();
+  });
+
+  it("a step node's picker shows the Provider dropdown, filtered to connected agents", () => {
+    render(
+      <NodeDetailModal
+        detail={makeStepDetail()}
+        index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
+        catalog={CATALOG} profiles={PROFILES} agents={AGENTS}
+      />,
+    );
+    const group = screen.getByRole("group", { name: "Step model" });
+    expect(within(group).getByLabelText("Provider")).toBeDefined();
+    expect(within(group).getByRole("option", { name: "Claude Code" })).toBeDefined();
   });
 
   it("a gate node with evalSubstrate 'worker' renders the picker", () => {
@@ -367,7 +387,7 @@ describe("NodeDetailModal — model picker", () => {
       <NodeDetailModal
         detail={{ ...makeGateDetail(), agentPreference: AGENT_PREFERENCE, evalSubstrate: "worker" }}
         index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
-        catalog={CATALOG} profiles={PROFILES}
+        catalog={CATALOG} profiles={PROFILES} agents={AGENTS}
       />,
     );
     expect(screen.getByRole("group", { name: "Gate model" })).toBeDefined();
@@ -378,7 +398,7 @@ describe("NodeDetailModal — model picker", () => {
       <NodeDetailModal
         detail={{ ...makeGateDetail(), evalSubstrate: "shadow" }}
         index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
-        catalog={CATALOG} profiles={PROFILES}
+        catalog={CATALOG} profiles={PROFILES} agents={AGENTS}
       />,
     );
     expect(screen.queryByRole("group", { name: "Gate model" })).toBeNull();
@@ -389,7 +409,7 @@ describe("NodeDetailModal — model picker", () => {
       <NodeDetailModal
         detail={makeSplitterDetail()}
         index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
-        catalog={CATALOG} profiles={PROFILES}
+        catalog={CATALOG} profiles={PROFILES} agents={AGENTS}
       />,
     );
     expect(screen.queryByLabelText("Model")).toBeNull();
@@ -403,7 +423,7 @@ describe("NodeDetailModal — model picker", () => {
       <NodeDetailModal
         detail={{ ...detail, agentPreference: [AGENT_PREFERENCE[0], fallback] }}
         index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
-        catalog={CATALOG} profiles={PROFILES}
+        catalog={CATALOG} profiles={PROFILES} agents={AGENTS}
       />,
     );
     const group = screen.getByRole("group", { name: "Step model" });
@@ -419,7 +439,7 @@ describe("NodeDetailModal — model picker", () => {
       <NodeDetailModal
         detail={makeStepDetail()}
         index={0} total={1} onPrev={null} onNext={null} onClose={vi.fn()} onDelete={vi.fn()}
-        catalog={CATALOG} profiles={PROFILES} readOnly
+        catalog={CATALOG} profiles={PROFILES} agents={AGENTS} readOnly
       />,
     );
     const group = screen.getByRole("group", { name: "Step model" });

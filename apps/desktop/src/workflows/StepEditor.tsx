@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CreateWorkflowTemplateRequest } from "@orca/contracts";
+import type { Agent, CreateWorkflowTemplateRequest } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
 import { ModelPicker, type CatalogEntry } from "./ModelPicker";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
@@ -17,6 +17,7 @@ export interface StepListEditorProps {
   // catalog — Instructions and Output schema stay usable either way.
   catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
+  agents: Agent[];
   catalogLoading?: boolean;
 }
 
@@ -89,6 +90,7 @@ export function StepEditor({
   onOutputSchemaValidityChange,
   catalog,
   profiles,
+  agents,
   catalogLoading = false,
 }: StepListEditorProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -407,6 +409,7 @@ export function StepEditor({
                       value={step.agentPreference[0]}
                       catalog={catalog}
                       profiles={profiles}
+                      agents={agents}
                       onChange={(next) =>
                         updateStep(i, { agentPreference: [next, ...step.agentPreference.slice(1)] })
                       }

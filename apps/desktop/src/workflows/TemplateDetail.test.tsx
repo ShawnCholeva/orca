@@ -19,11 +19,13 @@ vi.mock("./api", () => ({
 }));
 
 const getModelCatalogMock = vi.fn();
+const listAgentsMock = vi.fn();
 vi.mock("../api", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../api")>();
   return {
     ...mod,
     getModelCatalog: (...args: unknown[]) => getModelCatalogMock(...args),
+    listAgents: (...args: unknown[]) => listAgentsMock(...args),
   };
 });
 
@@ -103,6 +105,8 @@ describe("TemplateDetail", () => {
     createTemplateMock.mockReset();
     getModelCatalogMock.mockReset();
     getModelCatalogMock.mockResolvedValue({ adapters: [], profiles: [] });
+    listAgentsMock.mockReset();
+    listAgentsMock.mockResolvedValue([]);
   });
 
   // ── Locked / built-in ──────────────────────────────────────────────────────

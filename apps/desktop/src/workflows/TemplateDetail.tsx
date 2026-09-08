@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CreateWorkflowTemplateRequest,
+  type Agent,
   type CreateWorkflowTemplateRequest as CreateWorkflowTemplateInput,
   type WorkflowGraph,
   type WorkflowGraphNode,
   type WorkflowScope,
   type WorkflowTemplate,
 } from "@orca/contracts";
-import { getModelCatalog, toErrorMessage, type ModelCatalogProfile } from "../api";
+import { getModelCatalog, listAgents, toErrorMessage, type ModelCatalogProfile } from "../api";
 import { createTemplate, duplicateTemplate, saveTemplate } from "./api";
 import { LockIcon } from "./icons";
 import { type CatalogEntry } from "./ModelPicker";
@@ -142,6 +143,10 @@ export function TemplateDetail({
   const [catalogModels, setCatalogModels] = useState<CatalogEntry[]>([]);
   const [catalogProfiles, setCatalogProfiles] = useState<ModelCatalogProfile[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  // Drives the Provider dropdown in ModelPicker: which adapters are actually
+  // connected (Settings → Manage Agents), fetched alongside the catalog since
+  // both surfaces need it together.
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +163,13 @@ export function TemplateDetail({
       })
       .finally(() => {
         if (!cancelled) setCatalogLoading(false);
+      });
+    listAgents()
+      .then((list) => {
+        if (!cancelled) setAgents(list);
+      })
+      .catch(() => {
+        // non-fatal — the Provider dropdown just offers no choices until a refresh
       });
     return () => {
       cancelled = true;
@@ -662,6 +674,7 @@ export function TemplateDetail({
             onOutputSchemaValidityChange={setSchemaInvalid}
             catalog={catalogModels}
             profiles={catalogProfiles}
+            agents={agents}
             catalogLoading={catalogLoading}
           />
         ) : (
@@ -706,6 +719,7 @@ export function TemplateDetail({
           onOutputSchemaValidityChange={setSchemaInvalid}
           catalog={catalogModels}
           profiles={catalogProfiles}
+          agents={agents}
           catalogLoading={catalogLoading}
         />
       )}

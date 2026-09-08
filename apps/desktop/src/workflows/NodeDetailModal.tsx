@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
+import type { Agent, NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
 import { GateGlyph, SplitterGlyph, CloseIcon, ChevronLeftIcon, ChevronRightIcon } from "./icons";
 import { ModelPicker, type CatalogEntry } from "./ModelPicker";
@@ -64,6 +64,7 @@ export interface NodeDetailModalProps {
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
   catalog?: CatalogEntry[];
   profiles?: ModelCatalogProfile[];
+  agents?: Agent[];
   catalogLoading?: boolean;
 }
 
@@ -79,6 +80,7 @@ export function NodeDetailModal({
   onOutputSchemaValidityChange,
   catalog = [],
   profiles = [],
+  agents = [],
   catalogLoading = false,
 }: NodeDetailModalProps) {
   const isGate = detail.kind === "gate";
@@ -218,6 +220,7 @@ export function NodeDetailModal({
               readOnly={readOnly}
               catalog={catalog}
               profiles={profiles}
+              agents={agents}
               catalogLoading={catalogLoading}
             />
           ) : isSplitter ? (
@@ -229,6 +232,7 @@ export function NodeDetailModal({
               onOutputSchemaValidityChange={onOutputSchemaValidityChange}
               catalog={catalog}
               profiles={profiles}
+              agents={agents}
               catalogLoading={catalogLoading}
             />
           )}
@@ -268,12 +272,14 @@ function GateBody({
   readOnly,
   catalog,
   profiles,
+  agents,
   catalogLoading,
 }: {
   detail: Extract<NodeDetail, { kind: "gate" }>;
   readOnly?: boolean;
   catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
+  agents: Agent[];
   catalogLoading?: boolean;
 }) {
   return (
@@ -332,6 +338,7 @@ function GateBody({
               value={detail.agentPreference?.[0] ?? DEFAULT_AGENT_PREFERENCE}
               catalog={catalog}
               profiles={profiles}
+              agents={agents}
               onChange={(next) =>
                 detail.onChange({
                   agentPreference: [next, ...(detail.agentPreference ?? []).slice(1)],
@@ -486,6 +493,7 @@ function StepBody({
   onOutputSchemaValidityChange,
   catalog,
   profiles,
+  agents,
   catalogLoading,
 }: {
   detail: Extract<NodeDetail, { kind: "step" }>;
@@ -493,6 +501,7 @@ function StepBody({
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
   catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
+  agents: Agent[];
   catalogLoading?: boolean;
 }) {
   return (
@@ -552,6 +561,7 @@ function StepBody({
             value={detail.agentPreference[0]}
             catalog={catalog}
             profiles={profiles}
+            agents={agents}
             onChange={(next) =>
               detail.onChange({ agentPreference: [next, ...detail.agentPreference.slice(1)] })
             }

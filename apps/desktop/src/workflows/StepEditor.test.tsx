@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { Agent } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
 import type { CatalogEntry } from "./ModelPicker";
 import { StepEditor, type WorkflowStepDraft } from "./StepEditor";
@@ -19,6 +20,13 @@ const CATALOG: CatalogEntry[] = [
 ];
 
 const PROFILES: ModelCatalogProfile[] = [{ id: "reasoning", displayName: "Reasoning" }];
+
+const AGENTS: Agent[] = [
+  { id: "claude-code", name: "Claude Code", shortLabel: "", description: "", swatch: "#000", recommended: true,
+    connected: true, sortOrder: 10, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+  { id: "codex", name: "Codex CLI", shortLabel: "", description: "", swatch: "#000", recommended: true,
+    connected: true, sortOrder: 20, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+];
 
 function makeStep(id: string, name: string): WorkflowStepDraft {
   return {
@@ -46,14 +54,14 @@ const baseSteps: WorkflowStepDraft[] = [
 
 describe("StepEditor", () => {
   it("renders a row per step with its name", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
     expect(screen.getByDisplayValue("Research")).toBeDefined();
     expect(screen.getByDisplayValue("Implement")).toBeDefined();
   });
 
   it("editing a name input calls onChange with updated name", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     const input = screen.getByDisplayValue("Research");
     fireEvent.change(input, { target: { value: "Research v2" } });
@@ -66,7 +74,7 @@ describe("StepEditor", () => {
 
   it("Add step calls onChange with one more step (with default outputSchema)", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     fireEvent.click(screen.getByRole("button", { name: /add step/i }));
 
@@ -78,7 +86,7 @@ describe("StepEditor", () => {
 
   it("Remove calls onChange with that step gone", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     const removeBtns = screen.getAllByTitle("Remove step");
     fireEvent.click(removeBtns[0]);
@@ -91,7 +99,7 @@ describe("StepEditor", () => {
 
   it("Move up reorders — first step of second row goes before first", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     const moveUpBtns = screen.getAllByTitle("Move up");
     // Second step's "Move up"
@@ -105,7 +113,7 @@ describe("StepEditor", () => {
 
   it("Move down reorders — first step moves to second position", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     const moveDownBtns = screen.getAllByTitle("Move down");
     // First step's "Move down"
@@ -118,7 +126,7 @@ describe("StepEditor", () => {
   });
 
   it("expanding a row reveals instructions textarea and output schema editor", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     // Initially the detail panel is collapsed — no instructions textareas visible
     expect(screen.queryByLabelText("Step 1 instructions")).toBeNull();
@@ -134,7 +142,7 @@ describe("StepEditor", () => {
 
   it("editing instructions calls onChange with updated value", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     // Expand first row
     const detailBtns = screen.getAllByTitle("Edit details");
@@ -149,7 +157,7 @@ describe("StepEditor", () => {
   });
 
   it("disabled hides add/remove/move buttons and disables name inputs", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} disabled catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} disabled catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
     expect(screen.queryByTitle("Remove step")).toBeNull();
@@ -166,7 +174,7 @@ describe("StepEditor", () => {
     const stepWithInstructions: WorkflowStepDraft[] = [
       { ...makeStep("step-1", "Research"), instructions: "Gather data." },
     ];
-    render(<StepEditor steps={stepWithInstructions} onChange={vi.fn()} disabled catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={stepWithInstructions} onChange={vi.fn()} disabled catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     const detailBtn = screen.getByTitle("Edit details");
     fireEvent.click(detailBtn);
@@ -177,12 +185,23 @@ describe("StepEditor", () => {
   });
 
   it("renders a model picker for a step", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
     const group = screen.getByRole("group", { name: "Step 1 model" });
     expect(within(group).getByLabelText("Model")).toBeDefined();
+  });
+
+  it("shows the Provider dropdown labelled by the connected agent's name", () => {
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
+
+    fireEvent.click(screen.getAllByTitle("Edit details")[0]);
+
+    const group = screen.getByRole("group", { name: "Step 1 model" });
+    const providerSelect = within(group).getByLabelText("Provider") as HTMLSelectElement;
+    expect(providerSelect.value).toBe("claude-code");
+    expect(within(group).getByRole("option", { name: "Claude Code" })).toBeDefined();
   });
 
   it("choosing a different model updates agentPreference[0] and preserves the fallback entries behind it", () => {
@@ -198,7 +217,7 @@ describe("StepEditor", () => {
         ],
       },
     ];
-    render(<StepEditor steps={stepWithFallback} onChange={onChange} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={stepWithFallback} onChange={onChange} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
 
     fireEvent.click(screen.getByTitle("Edit details"));
     const group = screen.getByRole("group", { name: "Step 1 model" });
@@ -214,7 +233,7 @@ describe("StepEditor", () => {
 
   it("still renders instructions and output schema when the catalog is empty", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={[]} profiles={[]} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={[]} profiles={[]} agents={AGENTS} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
     const textarea = screen.getByLabelText("Step 1 instructions");
@@ -225,7 +244,7 @@ describe("StepEditor", () => {
 
   it("an empty model list disables the Pinned control, shows why, and never lets onChange emit an empty modelId", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={[]} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={[]} profiles={PROFILES} agents={AGENTS} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
     const group = screen.getByRole("group", { name: "Step 1 model" });
@@ -247,7 +266,7 @@ describe("StepEditor", () => {
 
   it("an empty profile list disables the Profile control and never lets onChange emit an empty ref", () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={[]} />);
+    render(<StepEditor steps={baseSteps} onChange={onChange} catalog={CATALOG} profiles={[]} agents={AGENTS} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
     const group = screen.getByRole("group", { name: "Step 1 model" });
@@ -263,7 +282,7 @@ describe("StepEditor", () => {
   });
 
   it("a populated catalog keeps both the Pinned and Profile controls enabled", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} />);
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
     const group = screen.getByRole("group", { name: "Step 1 model" });

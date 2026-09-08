@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { Agent } from "@orca/contracts";
 import { ModelPicker, type CatalogEntry } from "./ModelPicker.js";
 
 // Multi-adapter on purpose: GET /v1/model-catalog always returns all three
@@ -18,72 +19,151 @@ const CATALOG: CatalogEntry[] = [
 ];
 const PROFILES = [{ id: "reasoning", displayName: "Reasoning", requires: {}, rank: "strongest" as const }];
 
+function makeAgent(overrides: Partial<Agent> & Pick<Agent, "id" | "name" | "sortOrder" | "connected">): Agent {
+  return {
+    shortLabel: "",
+    description: "",
+    swatch: "#000000",
+    recommended: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+// Claude Code and Codex CLI connected; Antigravity present but not connected —
+// exercises the "connected AND has models" filter on both axes.
+const AGENTS: Agent[] = [
+  makeAgent({ id: "claude-code", name: "Claude Code", sortOrder: 10, connected: true }),
+  makeAgent({ id: "codex", name: "Codex CLI", sortOrder: 20, connected: true }),
+  makeAgent({ id: "antigravity", name: "Antigravity", sortOrder: 30, connected: false }),
+];
+
 const pinned = { kind: "pinned" as const, adapterId: "claude-code" as const, modelId: "claude-opus-5", contextVariant: "default" as const, effort: "high" as const };
 
 describe("ModelPicker", () => {
   it("lists models by display name, not by id", () => {
-    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={() => {}} />);
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
     expect(screen.getByRole("option", { name: "Opus 5" })).toBeInTheDocument();
   });
 
   it("offers a 1M context row only for a model that accepts the suffix", () => {
-    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={() => {}} />);
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
     expect(screen.getByRole("option", { name: "Opus 5 (1M context)" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Haiku 4.5 (1M context)" })).not.toBeInTheDocument();
   });
 
   it("offers only the effort levels the chosen model supports", () => {
-    render(<ModelPicker value={{ ...pinned, modelId: "claude-haiku-4-5", effort: "medium" }} catalog={CATALOG} profiles={PROFILES} onChange={() => {}} />);
+    render(<ModelPicker value={{ ...pinned, modelId: "claude-haiku-4-5", effort: "medium" }} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
     expect(screen.getByRole("option", { name: "high" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "max" })).not.toBeInTheDocument();
   });
 
   it("emits the model and its variant as separate fields", () => {
     const onChange = vi.fn();
-    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={onChange} />);
     fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-code::claude-opus-5::1m" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ modelId: "claude-opus-5", contextVariant: "1m" }));
   });
 
   it("resets effort to the new model's default when the choice changes", () => {
     const onChange = vi.fn();
-    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={onChange} />);
     fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-code::claude-haiku-4-5::default" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ effort: "medium" }));
   });
 
   it("switches to a profile reference and hides the effort control", () => {
     const onChange = vi.fn();
-    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={onChange} />);
     fireEvent.click(screen.getByRole("radio", { name: /profile/i }));
     expect(onChange).toHaveBeenCalledWith({ kind: "profile", ref: "reasoning" });
   });
 
-  it("emits the adapter the chosen model belongs to, not the one already pinned", () => {
-    const onChange = vi.fn();
-    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "codex::gpt-5.5::default" } });
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ adapterId: "codex", modelId: "gpt-5.5" }));
-  });
-
-  it("pins the first row's own adapter when the pinned arm is selected", () => {
-    const onChange = vi.fn();
-    const codexFirst = [CATALOG[2], CATALOG[0]];
-    render(<ModelPicker value={{ kind: "profile", ref: "reasoning" }} catalog={codexFirst} profiles={PROFILES} onChange={onChange} />);
-    fireEvent.click(screen.getByRole("radio", { name: /pinned model/i }));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ adapterId: "codex", modelId: "gpt-5.5" }));
-  });
-
   it("groups the models by family", () => {
-    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={() => {}} />);
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
     const select = screen.getByLabelText("Model");
     expect(within(select).getByRole("group", { name: "opus" })).toBeInTheDocument();
-    expect(within(select).getByRole("group", { name: "gpt-5" })).toBeInTheDocument();
   });
 
   it("shows the profile's name when the node references one", () => {
-    render(<ModelPicker value={{ kind: "profile", ref: "reasoning" }} catalog={CATALOG} profiles={PROFILES} onChange={() => {}} />);
+    render(<ModelPicker value={{ kind: "profile", ref: "reasoning" }} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
     expect(screen.getByDisplayValue("Reasoning")).toBeInTheDocument();
     expect(screen.queryByLabelText("Effort")).not.toBeInTheDocument();
+  });
+
+  // ── Provider dropdown ─────────────────────────────────────────────────────
+
+  it("lists only connected adapters that ship at least one catalog model, in sortOrder, labelled by the agent's own name", () => {
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
+    const providerSelect = screen.getByLabelText("Provider");
+    const optionNames = within(providerSelect).getAllByRole("option").map((o) => o.textContent);
+    expect(optionNames).toEqual(["Claude Code", "Codex CLI"]);
+  });
+
+  it("excludes a connected adapter that ships no catalog model", () => {
+    const claudeOnlyCatalog = CATALOG.filter((m) => m.adapterId === "claude-code");
+    render(<ModelPicker value={pinned} catalog={claudeOnlyCatalog} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
+    const providerSelect = screen.getByLabelText("Provider");
+    expect(within(providerSelect).queryByRole("option", { name: "Codex CLI" })).not.toBeInTheDocument();
+  });
+
+  it("filters the model list to the selected provider's models", () => {
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={() => {}} />);
+    const modelSelect = screen.getByLabelText("Model");
+    expect(within(modelSelect).getByRole("option", { name: "Opus 5" })).toBeInTheDocument();
+    expect(within(modelSelect).queryByRole("option", { name: "GPT-5.5" })).not.toBeInTheDocument();
+  });
+
+  it("switching provider emits a pinned choice naming the new provider's adapter and one of its own models", () => {
+    const onChange = vi.fn();
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "codex" } });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "pinned", adapterId: "codex", modelId: "gpt-5.5", effort: null }),
+    );
+    // Never a model from the previous provider left behind under the new adapter.
+    const call = onChange.mock.calls[0][0];
+    expect(CATALOG.find((m) => m.id === call.modelId)?.adapterId).toBe("codex");
+  });
+
+  it("keeps a saved choice whose provider is now disconnected visible, marked unavailable, and does not rewrite it on mount", () => {
+    const onChange = vi.fn();
+    const agentsWithClaudeDisconnected: Agent[] = [
+      makeAgent({ id: "claude-code", name: "Claude Code", sortOrder: 10, connected: false }),
+      makeAgent({ id: "codex", name: "Codex CLI", sortOrder: 20, connected: true }),
+    ];
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={agentsWithClaudeDisconnected} onChange={onChange} />);
+
+    // Still shown, not silently rewritten.
+    expect(onChange).not.toHaveBeenCalled();
+    const providerSelect = screen.getByLabelText("Provider") as HTMLSelectElement;
+    expect(providerSelect.value).toBe("claude-code");
+    expect(screen.getByRole("option", { name: /claude code.*not connected/i })).toBeInTheDocument();
+    expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("claude-code::claude-opus-5::default");
+
+    // Marked unavailable with an explanation.
+    expect(screen.getByText(/won't dispatch/i)).toBeInTheDocument();
+  });
+
+  it("pins the first connected provider's own first model when switching from profile to pinned mode", () => {
+    const onChange = vi.fn();
+    render(<ModelPicker value={{ kind: "profile", ref: "reasoning" }} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("radio", { name: /pinned model/i }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ kind: "pinned", adapterId: "claude-code", modelId: "claude-opus-5" }));
+  });
+
+  it("disables the controls and explains why when no agents are connected", () => {
+    const noneConnected: Agent[] = [
+      makeAgent({ id: "claude-code", name: "Claude Code", sortOrder: 10, connected: false }),
+      makeAgent({ id: "codex", name: "Codex CLI", sortOrder: 20, connected: false }),
+    ];
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={noneConnected} onChange={() => {}} />);
+
+    expect(screen.getByText(/no agents are connected/i)).toBeInTheDocument();
+    expect(screen.getByText(/settings/i)).toBeInTheDocument();
+    expect((screen.getByRole("radio", { name: /pinned model/i }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Provider") as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Model") as HTMLSelectElement).disabled).toBe(true);
   });
 });

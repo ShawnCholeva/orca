@@ -1,4 +1,4 @@
-import type { AdapterId, CatalogModel, ContextVariant, EffortLevel, NodeModelSelection } from "@orca/contracts";
+import type { Agent, AdapterId, CatalogModel, ContextVariant, EffortLevel, NodeModelSelection } from "@orca/contracts";
 
 interface Profile {
   id: string;
@@ -16,10 +16,17 @@ export interface CatalogEntry extends CatalogModel {
   adapterId: AdapterId;
 }
 
-export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPrefix = "" }: {
+interface ProviderOption {
+  id: AdapterId;
+  label: string;
+  unavailable: boolean;
+}
+
+export function ModelPicker({ value, catalog, profiles, agents, onChange, disabled, idPrefix = "" }: {
   value: NodeModelSelection;
   catalog: CatalogEntry[];
   profiles: Profile[];
+  agents: Agent[];
   onChange: (next: NodeModelSelection) => void;
   disabled?: boolean;
   // Distinguishes this picker's element ids when several are mounted at once
@@ -31,17 +38,70 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
   const model = isPinned
     ? catalog.find((m) => m.id === value.modelId && m.adapterId === value.adapterId)
     : undefined;
+  const providerSelectId = `${idPrefix}provider-select`;
   const modelSelectId = `${idPrefix}model-select`;
   const effortSelectId = `${idPrefix}effort-select`;
-  // An empty list means there is nothing valid to select — disable the
-  // control rather than let the UI emit a choice that fails contract
-  // validation (min(1) on modelId/ref) at save time with no context.
-  const noModels = catalog.length === 0;
   const noProfiles = profiles.length === 0;
+
+  // Providers offered are the agents the user has actually connected
+  // (Settings → Manage Agents) that also ship at least one catalog model,
+  // ordered the same way Manage Agents orders them.
+  const connectedProviders = agents
+    .filter((a) => a.connected && catalog.some((m) => m.adapterId === a.id))
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  // No agent connected at all — distinct from "connected but modelless",
+  // which the per-provider empty-model guard below already covers.
+  const noProviders = agents.filter((a) => a.connected).length === 0;
+
+  const currentAdapterId = isPinned ? value.adapterId : undefined;
+  const currentProviderConnected = currentAdapterId != null
+    ? connectedProviders.some((p) => p.id === currentAdapterId)
+    : true;
+
+  // A pinned choice whose provider was since disconnected (or removed from
+  // Settings) is kept visible, not silently rewritten — opening a template
+  // must never quietly change what it saves. It's appended as an extra,
+  // clearly-unavailable option so the Provider select still shows the truth.
+  const currentAgent = currentAdapterId != null ? agents.find((a) => a.id === currentAdapterId) : undefined;
+  const showUnavailableProvider = isPinned && currentAdapterId != null && !currentProviderConnected;
+
+  const providerOptions: ProviderOption[] = [
+    ...connectedProviders.map((a) => ({ id: a.id as AdapterId, label: a.name, unavailable: false })),
+    ...(showUnavailableProvider
+      ? [{
+          id: currentAdapterId as AdapterId,
+          label: `${currentAgent?.name ?? currentAdapterId} (not connected)`,
+          unavailable: true,
+        }]
+      : []),
+  ];
+
+  const selectedProviderId = currentAdapterId ?? (connectedProviders[0]?.id as AdapterId | undefined);
+  const modelsForProvider = selectedProviderId
+    ? catalog.filter((m) => m.adapterId === selectedProviderId)
+    : [];
+
+  // An empty list for the selected provider means there is nothing valid to
+  // select — disable the control rather than let the UI emit a choice that
+  // fails contract validation (min(1) on modelId/ref) at save time with no context.
+  const noModels = modelsForProvider.length === 0;
 
   // Option values carry the adapter so a selection can emit the adapter the
   // model actually belongs to; ids are only unique within an adapter.
-  const groups = groupByFamily(catalog);
+  const groups = groupByFamily(modelsForProvider);
+
+  function pinFirstOf(adapterId: AdapterId, models: CatalogEntry[]): NodeModelSelection {
+    const first = models[0];
+    return {
+      kind: "pinned",
+      adapterId,
+      modelId: first?.id ?? "",
+      contextVariant: "default",
+      effort: first?.defaultEffort ?? null,
+    };
+  }
 
   return (
     <div className="model-picker">
@@ -51,16 +111,10 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
             type="radio"
             name={`${idPrefix}model-kind`}
             checked={isPinned}
-            disabled={disabled || noModels}
+            disabled={disabled || noProviders || noModels}
             onChange={() => {
-              const first = catalog[0];
-              onChange({
-                kind: "pinned",
-                adapterId: first?.adapterId ?? "claude-code",
-                modelId: first?.id ?? "",
-                contextVariant: "default",
-                effort: first?.defaultEffort ?? null,
-              });
+              const adapterId = selectedProviderId ?? "claude-code";
+              onChange(pinFirstOf(adapterId, modelsForProvider));
             }}
           />
           Pinned model
@@ -77,7 +131,12 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
         </label>
       </div>
 
-      {noModels && (
+      {noProviders && (
+        <p className="model-picker__note">
+          No agents are connected — enable one in Settings → Manage Agents.
+        </p>
+      )}
+      {!noProviders && noModels && (
         <p className="model-picker__note">
           No models available — check the Models section in Settings.
         </p>
@@ -94,11 +153,38 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
       {isPinned ? (
         <>
           <div className="model-picker__field">
+            <label htmlFor={providerSelectId}>Provider</label>
+            <select
+              id={providerSelectId}
+              value={currentAdapterId ?? ""}
+              disabled={disabled || noProviders}
+              onChange={(e) => {
+                const adapterId = e.target.value as AdapterId;
+                const models = catalog.filter((m) => m.adapterId === adapterId);
+                onChange(pinFirstOf(adapterId, models));
+              }}
+            >
+              {providerOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {showUnavailableProvider && !noProviders && (
+            // Skipped when noProviders is also true — the broader "no agents
+            // connected" note above already explains why nothing will dispatch.
+            <p className="model-picker__note model-picker__note--warn">
+              This step won't dispatch until {currentAgent?.name ?? currentAdapterId} is enabled in
+              Settings, or another provider is chosen.
+            </p>
+          )}
+
+          <div className="model-picker__field">
             <label htmlFor={modelSelectId}>Model</label>
             <select
               id={modelSelectId}
               value={`${value.adapterId}::${value.modelId}::${value.contextVariant}`}
-              disabled={disabled || noModels}
+              disabled={disabled || noProviders || noModels}
               onChange={(e) => {
                 const [adapterId, modelId, variant] = e.target.value.split("::") as [AdapterId, string, ContextVariant];
                 const next = catalog.find((m) => m.id === modelId && m.adapterId === adapterId);

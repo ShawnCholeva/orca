@@ -346,6 +346,13 @@
   color: var(--text-3);
 }
 
+/* A pinned choice whose provider was disconnected after the fact — kept
+   visible rather than rewritten, but flagged so it isn't mistaken for a
+   healthy selection. */
+.model-picker__note--warn {
+  color: var(--warn);
+}
+
 .model-picker__field {
   display: flex;
   flex-direction: column;

@@ -23,6 +23,7 @@ vi.mock("./api", () => ({
 const listGoalsMock = vi.fn();
 const listTemplateCatalogMock = vi.fn();
 const getModelCatalogMock = vi.fn();
+const listAgentsMock = vi.fn();
 vi.mock("../api", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../api")>();
   return {
@@ -31,6 +32,7 @@ vi.mock("../api", async (importOriginal) => {
     listTemplateCatalog: (...args: unknown[]) => listTemplateCatalogMock(...args),
     openEventStream: () => ({ close() {} }),
     getModelCatalog: (...args: unknown[]) => getModelCatalogMock(...args),
+    listAgents: (...args: unknown[]) => listAgentsMock(...args),
   };
 });
 
@@ -86,6 +88,8 @@ describe("WorkflowsPage", () => {
     listTemplateCatalogMock.mockResolvedValue([]);
     getModelCatalogMock.mockReset();
     getModelCatalogMock.mockResolvedValue({ adapters: [], profiles: [] });
+    listAgentsMock.mockReset();
+    listAgentsMock.mockResolvedValue([]);
   });
 
   it("renders an empty state when there are no templates", async () => {
