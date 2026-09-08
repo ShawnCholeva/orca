@@ -14,6 +14,10 @@ describe("pricingRank", () => {
   it("sorts an unparseable tier last rather than assuming it is cheap", () => {
     expect(pricingRank("mystery")).toBeGreaterThan(pricingRank("tier_10_50"));
   });
+
+  it("ranks a suffixed tier by its base rates", () => {
+    expect(pricingRank("tier_10_50_cache_read_0_25")).toBe(pricingRank("tier_10_50"));
+  });
 });
 
 describe("SEED_CATALOG", () => {
@@ -27,10 +31,16 @@ describe("SEED_CATALOG", () => {
     expect(opus?.contextWindow).toBe(1_000_000);
   });
 
-  it("gives every claude model a default effort, since the adapter has an effort axis", () => {
-    for (const model of SEED_CATALOG["claude-code"]) {
-      expect(model.defaultEffort).not.toBeNull();
-    }
+  it("gives a model with an effort capability a default effort", () => {
+    const opus = SEED_CATALOG["claude-code"].find((m) => m.id === "claude-opus-5");
+    expect(opus?.defaultEffort).toBe("high");
+    expect(opus?.supportedEfforts).toHaveLength(5);
+  });
+
+  it("gives a model without an effort capability no efforts and no default", () => {
+    const haiku = SEED_CATALOG["claude-code"].find((m) => m.id === "claude-haiku-4-5");
+    expect(haiku?.supportedEfforts).toEqual([]);
+    expect(haiku?.defaultEffort).toBeNull();
   });
 
   it("gives codex and antigravity models no supported efforts in v1", () => {
