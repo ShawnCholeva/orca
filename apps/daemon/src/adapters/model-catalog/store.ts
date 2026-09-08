@@ -29,11 +29,16 @@ export function readCachedCatalog(
   return row ? (JSON.parse(row.payload_json) as CatalogModel[]) : null;
 }
 
-function readNewestCached(db: Database.Database, adapterId: AdapterId): CatalogModel[] | null {
+function readNewestCached(
+  db: Database.Database,
+  adapterId: AdapterId,
+): { models: CatalogModel[]; version: string } | null {
   const row = db
-    .prepare("SELECT payload_json FROM model_catalog_cache WHERE adapter_id=? ORDER BY extracted_at DESC LIMIT 1")
-    .get(adapterId) as { payload_json: string } | undefined;
-  return row ? (JSON.parse(row.payload_json) as CatalogModel[]) : null;
+    .prepare(
+      "SELECT adapter_version, payload_json FROM model_catalog_cache WHERE adapter_id=? ORDER BY extracted_at DESC, rowid DESC LIMIT 1",
+    )
+    .get(adapterId) as { adapter_version: string; payload_json: string } | undefined;
+  return row ? { models: JSON.parse(row.payload_json) as CatalogModel[], version: row.adapter_version } : null;
 }
 
 /**
@@ -63,8 +68,8 @@ export async function loadCatalog(
   }
 
   const newest = readNewestCached(db, adapterId);
-  if (newest && newest.length > 0) {
-    return { models: newest, source: "cached", adapterVersion: version };
+  if (newest && newest.models.length > 0) {
+    return { models: newest.models, source: "cached", adapterVersion: newest.version };
   }
-  return { models: SEED_CATALOG[adapterId] ?? [], source: "seed", adapterVersion: version };
+  return { models: SEED_CATALOG[adapterId] ?? [], source: "seed", adapterVersion: null };
 }

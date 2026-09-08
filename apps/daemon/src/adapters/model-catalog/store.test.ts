@@ -84,4 +84,31 @@ describe("loadCatalog", () => {
     expect(got.source).toBe("seed");
     expect(got.models).toEqual(SEED_CATALOG.codex);
   });
+
+  it("reports the version the cached models actually came from, not the installed one", async () => {
+    const now = () => "2026-09-07T00:00:00Z";
+    await loadCatalog(db, "claude-code", { version: async () => "1.9.0", extract: async () => [MODEL], now });
+    const got = await loadCatalog(db, "claude-code", {
+      version: async () => "2.2.0", extract: async () => [], now,
+    });
+    expect(got.source).toBe("cached");
+    expect(got.adapterVersion).toBe("1.9.0");
+  });
+
+  it("reports no version for a seed-sourced catalog", async () => {
+    const got = await loadCatalog(db, "claude-code", {
+      version: async () => "2.1.263", extract: async () => [], now: () => "2026-09-07T00:00:00Z",
+    });
+    expect(got.source).toBe("seed");
+    expect(got.adapterVersion).toBeNull();
+  });
+
+  it("prefers the most recently extracted row when timestamps tie", async () => {
+    const now = () => "2026-09-07T00:00:00Z";
+    await loadCatalog(db, "claude-code", { version: async () => "1.0.0", extract: async () => [MODEL], now });
+    await loadCatalog(db, "claude-code", { version: async () => "1.1.0", extract: async () => [{ ...MODEL, id: "claude-newer" }], now });
+    const got = await loadCatalog(db, "claude-code", { version: async () => "9.9.9", extract: async () => [], now });
+    expect(got.adapterVersion).toBe("1.1.0");
+    expect(got.models[0].id).toBe("claude-newer");
+  });
 });
