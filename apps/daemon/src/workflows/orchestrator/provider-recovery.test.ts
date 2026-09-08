@@ -24,7 +24,7 @@ function agent(
 
 const CODEX_MINI: CatalogModel = {
   id: "gpt-5.4-mini", family: "gpt-5-mini", displayName: "GPT-5.4 mini", contextWindow: 400_000,
-  supports1mSuffix: false, pricingTier: null, advisorRank: null,
+  supports1mSuffix: false, pricingTier: null, advisorRank: 1,
   supportedEfforts: [], defaultEffort: null,
 };
 /** Only codex ships the step's configured model; every other adapter is empty. */
@@ -164,10 +164,33 @@ describe("buildProviderRecoveryChoices", () => {
     ]);
   });
 
-  it("skips a profile-arm preference, which names no adapter", async () => {
+  it("resolves a profile-arm preference against the candidate adapter's own catalog", async () => {
     const choices = await buildProviderRecoveryChoices({
       currentAdapterId: "claude-code",
       connectedAdapterIds: ["claude-code", "codex"],
+      // A profile names no adapter, so every candidate gets to satisfy it.
+      stepPreferences: [{ kind: "profile", ref: "light" }],
+      operators: [agent("claude-code", true), agent("codex", true)],
+      catalogFor,
+      profiles,
+    });
+
+    expect(choices).toEqual([
+      {
+        adapterId: "codex",
+        displayName: "Codex",
+        modelId: "gpt-5.4-mini",
+        enabled: true,
+        reason: null,
+      },
+    ]);
+  });
+
+  it("disables an adapter whose catalog satisfies no model in the profile", async () => {
+    const choices = await buildProviderRecoveryChoices({
+      currentAdapterId: "claude-code",
+      connectedAdapterIds: ["claude-code", "codex"],
+      // "reasoning" needs minStrength 4; the codex entry ranks 1.
       stepPreferences: [{ kind: "profile", ref: "reasoning" }],
       operators: [agent("claude-code", true), agent("codex", true)],
       catalogFor,
@@ -180,7 +203,32 @@ describe("buildProviderRecoveryChoices", () => {
         displayName: "Codex",
         modelId: null,
         enabled: false,
-        reason: "not configured for this step",
+        reason: "no model here matches the configured profile",
+      },
+    ]);
+  });
+
+  it("prefers a pinned arm over the profile arm for the adapter it names", async () => {
+    const choices = await buildProviderRecoveryChoices({
+      currentAdapterId: "claude-code",
+      connectedAdapterIds: ["claude-code", "codex"],
+      stepPreferences: [
+        { kind: "profile", ref: "reasoning" },
+        { kind: "pinned", adapterId: "codex", modelId: "gpt-5.4-mini", contextVariant: "default", effort: null },
+      ],
+      operators: [agent("claude-code", true), agent("codex", true)],
+      catalogFor,
+      profiles,
+    });
+
+    // The unsatisfiable profile does not disable an adapter the step pinned.
+    expect(choices).toEqual([
+      {
+        adapterId: "codex",
+        displayName: "Codex",
+        modelId: "gpt-5.4-mini",
+        enabled: true,
+        reason: null,
       },
     ]);
   });

@@ -16,6 +16,14 @@ export const SEED_CATALOG: Record<AdapterId, CatalogModel[]> = {
     { id: "claude-sonnet-5", family: "sonnet", displayName: "Sonnet 5", contextWindow: 1_000_000,
       supports1mSuffix: false, pricingTier: "tier_2_10", advisorRank: 3,
       supportedEfforts: [...CLAUDE_EFFORTS], defaultEffort: "high" },
+    { id: "claude-opus-4-7", family: "opus", displayName: "Opus 4.7", contextWindow: 1_000_000,
+      supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
+      supportedEfforts: [...CLAUDE_EFFORTS], defaultEffort: "xhigh" },
+    // No default_effort despite advertising four levels — real, and exactly the
+    // case settleEffort's "high" fallback exists for. Do not "fix" it to a value.
+    { id: "claude-sonnet-4-6", family: "sonnet", displayName: "Sonnet 4.6", contextWindow: 200_000,
+      supports1mSuffix: true, pricingTier: "tier_3_15", advisorRank: 2,
+      supportedEfforts: ["low", "medium", "high", "xhigh"], defaultEffort: null },
     { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
       supports1mSuffix: true, pricingTier: "haiku_45", advisorRank: 1,
       supportedEfforts: [], defaultEffort: null },

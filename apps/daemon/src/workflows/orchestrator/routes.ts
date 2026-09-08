@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import {
   NextOrchestratorDecisionResponse,
   RequestNextOrchestratorDecisionRequest,
+  type ResolvedModelChoice,
 } from "@orca/contracts";
 
 import type { EventBus } from "../../events.js";
@@ -31,7 +32,7 @@ export interface OrchestratorRouteDeps {
   stepDispatch?: StepDispatchCapabilities;
   /** Runs the launched step's session as a headless tmux worker. Without this,
    *  next-decision's launch follow-through would only create a session row. */
-  workerSpawn?: (input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>;
+  workerSpawn?: (input: { sessionId: string; goalId: string; adapterId: string; model?: ResolvedModelChoice }) => Promise<void>;
   /** Submits the composed initial objective to the freshly-spawned worker. */
   workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">;
   now?: () => string;

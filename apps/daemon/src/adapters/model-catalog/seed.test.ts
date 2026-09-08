@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { StepAgentChoice } from "@orca/contracts";
 import { SEED_CATALOG } from "./seed.js";
 import { pricingRank } from "./types.js";
 
@@ -41,6 +42,34 @@ describe("SEED_CATALOG", () => {
     const haiku = SEED_CATALOG["claude-code"].find((m) => m.id === "claude-haiku-4-5");
     expect(haiku?.supportedEfforts).toEqual([]);
     expect(haiku?.defaultEffort).toBeNull();
+  });
+
+  /**
+   * The seed is the floor that keeps dispatch working when extraction fails.
+   * Membership in the catalog is what makes a preference dispatchable, so a
+   * built-in template pinning a model the seed omits reroutes every one of its
+   * steps to another adapter — or blocks the run — the moment extraction fails.
+   * The tier constants and the seed must be edited together; this is the
+   * falsifier for that.
+   */
+  it("seeds every claude-code model the built-in templates pin", async () => {
+    const { BUILTIN_TEMPLATE_CATALOG } = await import("../../workflows/templates/catalog.js");
+    const seeded = new Set(SEED_CATALOG["claude-code"].map((m) => m.id));
+    const pinned = new Set<string>();
+    const collect = (prefs: readonly StepAgentChoice[] | undefined) => {
+      for (const pref of prefs ?? []) {
+        if (pref.kind === "pinned" && pref.adapterId === "claude-code") pinned.add(pref.modelId);
+      }
+    };
+    for (const tpl of BUILTIN_TEMPLATE_CATALOG) {
+      for (const step of tpl.steps) collect(step.agentPreference);
+      // Gates carry their own agentPreference (the strong-critic lever).
+      for (const node of tpl.graph?.nodes ?? []) {
+        collect((node as { agentPreference?: StepAgentChoice[] }).agentPreference);
+      }
+    }
+    expect(pinned.size).toBeGreaterThan(0);
+    expect([...pinned].filter((id) => !seeded.has(id))).toEqual([]);
   });
 
   it("gives codex and antigravity models no supported efforts in v1", () => {

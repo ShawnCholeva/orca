@@ -26,15 +26,17 @@ export interface BuildProviderRecoveryChoicesInput {
 export async function buildProviderRecoveryChoices(
   input: BuildProviderRecoveryChoicesInput
 ): Promise<ProviderRecoveryChoice[]> {
-  // A profile-arm preference names no adapter, so it cannot key this map. Its
-  // adapter is decided at dispatch, not authored — the recovery list offers only
-  // the adapters the step actually pinned.
-  const preferenceByAdapter = new Map(
+  // A profile-arm preference names no adapter, so it cannot key this map — but
+  // it is not therefore inapplicable: a profile is a requirement set, and every
+  // candidate adapter gets to satisfy it from its own catalog. Pins win where
+  // they name the adapter; the first profile arm is the fallback for the rest.
+  const pinnedByAdapter = new Map(
     input.stepPreferences
       .map((preference) => asPinned(preference))
       .filter((preference) => preference !== null)
       .map((preference) => [preference.adapterId, preference])
   );
+  const profileArm = input.stepPreferences.find((pref) => pref.kind === "profile") ?? null;
   const connected = new Set(input.connectedAdapterIds);
 
   const eligible = input.operators
@@ -45,7 +47,7 @@ export async function buildProviderRecoveryChoices(
   return Promise.all(
     eligible.map(async (operator): Promise<ProviderRecoveryChoice> => {
       const adapterId = AdapterId.parse(operator.id.slice("agent:".length));
-      const preference = preferenceByAdapter.get(adapterId);
+      const preference = pinnedByAdapter.get(adapterId) ?? profileArm;
 
       if (!preference) {
         return {
@@ -63,9 +65,12 @@ export async function buildProviderRecoveryChoices(
         return {
           adapterId,
           displayName: operator.displayName,
-          modelId: preference.modelId,
+          modelId: preference.kind === "pinned" ? preference.modelId : null,
           enabled: false,
-          reason: "configured model is not supported",
+          reason:
+            preference.kind === "pinned"
+              ? "configured model is not supported"
+              : "no model here matches the configured profile",
         };
       }
 
