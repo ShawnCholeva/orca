@@ -103,6 +103,23 @@ describe("loadCatalog", () => {
     expect(got.adapterVersion).toBeNull();
   });
 
+  it("re-extracts when forced, even though this version is already cached", async () => {
+    const extract = vi.fn().mockResolvedValue([MODEL]);
+    const deps = { version: async () => "2.1.263", extract, now: () => "2026-09-07T00:00:00Z" };
+    await loadCatalog(db, "claude-code", deps);
+    const forced = await loadCatalog(db, "claude-code", deps, { force: true });
+    expect(extract).toHaveBeenCalledTimes(2);
+    expect(forced.source).toBe("extracted");
+  });
+
+  it("still serves the cache when not forced", async () => {
+    const extract = vi.fn().mockResolvedValue([MODEL]);
+    const deps = { version: async () => "2.1.263", extract, now: () => "2026-09-07T00:00:00Z" };
+    await loadCatalog(db, "claude-code", deps);
+    await loadCatalog(db, "claude-code", deps, {});
+    expect(extract).toHaveBeenCalledTimes(1);
+  });
+
   it("prefers the most recently extracted row when timestamps tie", async () => {
     const now = () => "2026-09-07T00:00:00Z";
     await loadCatalog(db, "claude-code", { version: async () => "1.0.0", extract: async () => [MODEL], now });

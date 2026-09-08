@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { registerModelCatalogRoutes } from "./routes.js";
+import { SEED_CATALOG } from "./seed.js";
 import type { CatalogModel } from "./types.js";
 
 const MODEL: CatalogModel = {
@@ -58,5 +59,58 @@ describe("POST /v1/model-catalog/refresh", () => {
     const res = await appWith("extracted").inject({ method: "POST", url: "/v1/model-catalog/refresh" });
     expect(res.statusCode).toBe(200);
     expect(res.json().adapters).toBeDefined();
+  });
+
+  it("passes force=true on refresh and force=false on read", async () => {
+    const seen: Array<boolean | undefined> = [];
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE model_catalog_cache (
+      adapter_id TEXT NOT NULL, adapter_version TEXT NOT NULL,
+      extracted_at TEXT NOT NULL, payload_json TEXT NOT NULL,
+      PRIMARY KEY (adapter_id, adapter_version))`);
+    const app = Fastify();
+    registerModelCatalogRoutes(app, {
+      db,
+      load: async (_db, adapterId, opts) => {
+        seen.push(opts?.force);
+        return { models: adapterId === "claude-code" ? [MODEL] : [], source: "extracted", adapterVersion: "2.1.263" };
+      },
+    });
+
+    await app.inject({ method: "GET", url: "/v1/model-catalog" });
+    await app.inject({ method: "POST", url: "/v1/model-catalog/refresh" });
+
+    expect(seen).toEqual([false, false, false, true, true, true]);
+  });
+});
+
+describe("adapter isolation", () => {
+  it("serves the seed for an adapter whose load rejects, without dropping the others", async () => {
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE model_catalog_cache (
+      adapter_id TEXT NOT NULL, adapter_version TEXT NOT NULL,
+      extracted_at TEXT NOT NULL, payload_json TEXT NOT NULL,
+      PRIMARY KEY (adapter_id, adapter_version))`);
+    const app = Fastify();
+    registerModelCatalogRoutes(app, {
+      db,
+      load: async (_db, adapterId) => {
+        if (adapterId === "codex") throw new Error("db locked");
+        return { models: adapterId === "claude-code" ? [MODEL] : [], source: "extracted", adapterVersion: "2.1.263" };
+      },
+    });
+
+    const res = await app.inject({ method: "GET", url: "/v1/model-catalog" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.adapters).toHaveLength(3);
+
+    const claude = body.adapters.find((a: { adapterId: string }) => a.adapterId === "claude-code");
+    expect(claude.source).toBe("extracted");
+
+    const codex = body.adapters.find((a: { adapterId: string }) => a.adapterId === "codex");
+    expect(codex.source).toBe("seed");
+    expect(codex.adapterVersion).toBeNull();
+    expect(codex.models).toEqual(SEED_CATALOG.codex);
   });
 });
