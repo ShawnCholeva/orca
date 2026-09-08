@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Agent, SupervisionMode } from "@orca/contracts";
 import { useTheme } from "../theme/ThemeProvider";
-import { getSettings, putSettings } from "../api";
+import { getSettings, putSettings, getModelCatalog, refreshModelCatalog, type ModelCatalogAdapter } from "../api";
 import type { ThemeDefinition } from "../theme/themes";
 import { glyphFor, CheckIcon, XIcon } from "../onboarding/glyphs";
+import { ModelCatalogPanel } from "./ModelCatalogPanel";
 import "./settings.css";
 
 type SettingsTab = "appearance" | "orchestration" | "agents";
@@ -258,7 +259,70 @@ function ManageAgentsTab({
           </div>
         </section>
       )}
+
+      <ModelCatalogSection />
     </>
+  );
+}
+
+// ───────────────────────── Model catalog ─────────────────────────
+
+function ModelCatalogSection() {
+  const [adapters, setAdapters] = useState<ModelCatalogAdapter[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getModelCatalog()
+      .then((res) => {
+        if (active) setAdapters(res.adapters);
+      })
+      .catch(() => {
+        if (active) setLoadError(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function refresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const res = await refreshModelCatalog();
+      setAdapters(res.adapters);
+      setLoadError(false);
+    } catch {
+      // Keep showing whatever catalog is already on screen — a failed
+      // refresh should not blank out a panel that was working a moment ago.
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  if (loadError && !adapters) {
+    return (
+      <section className="settings-agent-section">
+        <div className="settings-section-label">Models</div>
+        <div className="settings-agent-empty">Couldn't load the model catalog.</div>
+      </section>
+    );
+  }
+
+  if (!adapters) {
+    return (
+      <section className="settings-agent-section">
+        <div className="settings-section-label">Models</div>
+        <div className="settings-agent-empty">Loading model catalog…</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="settings-agent-section">
+      <ModelCatalogPanel adapters={adapters} onRefresh={refresh} refreshing={refreshing} />
+    </section>
   );
 }
 

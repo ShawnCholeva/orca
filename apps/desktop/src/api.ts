@@ -891,6 +891,18 @@ export async function getModelCatalog(): Promise<ModelCatalogResponse> {
   return res.json();
 }
 
+export async function refreshModelCatalog(): Promise<ModelCatalogResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/model-catalog/refresh`, {
+    method: "POST",
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    throw new ApiError(`Refresh model catalog failed (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function updateGoalOrchestratorModel(
   goalId: string,
   body: UpdateGoalOrchestratorModelRequest,
