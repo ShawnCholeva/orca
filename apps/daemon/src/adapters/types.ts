@@ -1,4 +1,11 @@
-import type { AdapterId, AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
+import type {
+  AdapterId,
+  AgentReadinessStatus,
+  CheckStep,
+  RepairAction,
+  ExecutionMode,
+  ResolvedModelChoice,
+} from "@orca/contracts";
 import { inheritCredEnv } from "../readiness/exec.js";
 
 // Non-secret host vars an interactive agent (and its shell hooks) needs to
@@ -23,6 +30,8 @@ export interface AdapterSpawnInput {
   workspacePath: string;
   role?: string;
   instruction?: string;
+  /** The model this session must run. Absent only where none was resolved. */
+  model?: ResolvedModelChoice;
 }
 
 export interface AdapterSpawnResult {
@@ -49,6 +58,8 @@ export interface AgentAdapter {
   supportedExecutionModes: ExecutionMode[];
   /** Return true if this adapter can drive the given model id. */
   supportsModel(modelId: string): boolean;
+  /** Translate a resolved choice into this CLI's own flags. */
+  modelSpawnArgs(choice: ResolvedModelChoice): string[];
   contextDelivery: AdapterContextDelivery;
   resolveSpawn(input: AdapterSpawnInput): Promise<AdapterSpawnResult>;
   probeAvailability(): Promise<AdapterAvailability>;

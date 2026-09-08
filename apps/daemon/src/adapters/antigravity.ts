@@ -11,7 +11,13 @@ import { runCheckCommand, inheritCredEnv, type RunCheckResult } from "../readine
 import { sanitizeOutput } from "../readiness/sanitize.js";
 import { installUrlFor, signInCommandFor } from "../readiness/repair-links.js";
 import { parseVersion } from "../readiness/version.js";
-import type { AgentReadinessStatus, CheckStep, RepairAction, ExecutionMode } from "@orca/contracts";
+import type {
+  AgentReadinessStatus,
+  CheckStep,
+  RepairAction,
+  ExecutionMode,
+  ResolvedModelChoice,
+} from "@orca/contracts";
 import { adapterSupportsModel } from "./model-catalog.js";
 
 export type RunCheckFn = (
@@ -34,6 +40,10 @@ export class AntigravityAdapter implements AgentAdapter {
     return adapterSupportsModel(this.id, modelId);
   }
 
+  modelSpawnArgs(choice: ResolvedModelChoice): string[] {
+    return ["--model", choice.modelId];
+  }
+
   constructor(
     private readonly resolveFn: ResolveFn = resolveBinary,
     private readonly runFn: RunCheckFn = runCheckCommand,
@@ -47,7 +57,12 @@ export class AntigravityAdapter implements AgentAdapter {
         { code: "command_not_found" },
       );
     }
-    return { command: result.resolvedPath, args: [], env: buildSpawnEnv(input), cwd: input.workspacePath };
+    return {
+      command: result.resolvedPath,
+      args: input.model ? this.modelSpawnArgs(input.model) : [],
+      env: buildSpawnEnv(input),
+      cwd: input.workspacePath,
+    };
   }
 
   async probeAvailability(): Promise<AdapterAvailability> {

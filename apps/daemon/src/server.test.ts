@@ -836,6 +836,7 @@ function fakeAdapter(id: string, ready: boolean): AgentAdapter {
     },
     repairFor() { return undefined; },
     supportsModel: () => false,
+    modelSpawnArgs: () => [],
   };
 }
 

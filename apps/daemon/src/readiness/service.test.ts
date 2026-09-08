@@ -33,6 +33,7 @@ function makeAdapter(id: string, opts: {
       return { kind: "run_command" as const, command: `${id} fix`, label: "Fix" };
     },
     supportsModel: () => false,
+    modelSpawnArgs: () => [],
   };
 }
 
