@@ -275,14 +275,64 @@ export const WorkflowGuardrailConfig = z
   .strict();
 export type WorkflowGuardrailConfig = z.infer<typeof WorkflowGuardrailConfig>;
 
-export const StepAgentChoice = z
+export const EffortLevel = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type EffortLevel = z.infer<typeof EffortLevel>;
+
+export const ContextVariant = z.enum(["default", "1m"]);
+export type ContextVariant = z.infer<typeof ContextVariant>;
+
+/** A node's model choice, fully specified. */
+export const PinnedModelChoice = z
   .object({
+    kind: z.literal("pinned"),
     adapterId: AdapterId,
     modelId: z.string().min(1).max(80),
+    contextVariant: ContextVariant.default("default"),
+    // Nullable by necessity: every legacy entry has no effort, and resolution
+    // fills it from the model's catalog default_effort. See Global Constraints.
+    effort: EffortLevel.nullable().default(null),
     providerId: ModelProviderId.optional(),
   })
   .strict();
+
+export const ProfileModelChoice = z
+  .object({ kind: z.literal("profile"), ref: z.string().min(1).max(80) })
+  .strict();
+
+export const NodeModelSelection = z.discriminatedUnion("kind", [
+  PinnedModelChoice,
+  ProfileModelChoice,
+]);
+export type NodeModelSelection = z.infer<typeof NodeModelSelection>;
+
+/**
+ * Legacy `{adapterId, modelId}` entries predate the union and are still present
+ * in every stored template_snapshot_json. Preprocess rather than migrate: those
+ * snapshots are append-only history and re-parsed on every in-flight run.
+ */
+export const StepAgentChoice = z.preprocess((raw) => {
+  if (raw && typeof raw === "object" && !("kind" in raw)) {
+    return { ...(raw as Record<string, unknown>), kind: "pinned" };
+  }
+  return raw;
+}, NodeModelSelection);
 export type StepAgentChoice = z.infer<typeof StepAgentChoice>;
+
+/** Narrow to the pinned arm; profiles are resolved in the daemon (Task 6). */
+export function asPinned(choice: StepAgentChoice) {
+  return choice.kind === "pinned" ? choice : null;
+}
+
+/** What actually runs, and what gets recorded. */
+export const ResolvedModelChoice = z
+  .object({
+    adapterId: AdapterId,
+    modelId: z.string().min(1).max(80),
+    contextVariant: ContextVariant,
+    effort: EffortLevel.nullable(),
+  })
+  .strict();
+export type ResolvedModelChoice = z.infer<typeof ResolvedModelChoice>;
 
 export const StepCompletionPolicy = z.enum(["interview", "reasoning", "handoff"]);
 export type StepCompletionPolicy = z.infer<typeof StepCompletionPolicy>;
