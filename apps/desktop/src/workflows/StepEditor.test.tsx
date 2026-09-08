@@ -1,6 +1,39 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StepEditor, type WorkflowStepDraft } from "./StepEditor";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => false,
+  invoke: vi.fn(),
+}));
+
+const getModelCatalogMock = vi.fn();
+vi.mock("../api", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../api")>();
+  return {
+    ...mod,
+    getModelCatalog: (...args: unknown[]) => getModelCatalogMock(...args),
+  };
+});
+
+const CATALOG_RESPONSE = {
+  adapters: [
+    {
+      adapterId: "claude-code" as const,
+      adapterVersion: "2.1.263",
+      source: "extracted" as const,
+      models: [
+        { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
+          supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
+          supportedEfforts: ["low", "medium", "high"] as const, defaultEffort: "medium" as const },
+        { id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
+          supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
+          supportedEfforts: ["low", "medium", "high", "xhigh", "max"] as const, defaultEffort: "high" as const },
+      ],
+    },
+  ],
+  profiles: [],
+};
 
 function makeStep(id: string, name: string): WorkflowStepDraft {
   return {
@@ -27,6 +60,11 @@ const baseSteps: WorkflowStepDraft[] = [
 ];
 
 describe("StepEditor", () => {
+  beforeEach(() => {
+    getModelCatalogMock.mockReset();
+    getModelCatalogMock.mockResolvedValue(CATALOG_RESPONSE);
+  });
+
   it("renders a row per step with its name", () => {
     render(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
     expect(screen.getByDisplayValue("Research")).toBeDefined();
@@ -156,5 +194,74 @@ describe("StepEditor", () => {
     const textarea = screen.getByLabelText("Step 1 instructions") as HTMLTextAreaElement;
     expect(textarea.value).toBe("Gather data.");
     expect(textarea.disabled).toBe(true);
+  });
+
+  it("renders a model picker for a step", async () => {
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getAllByTitle("Edit details")[0]);
+
+    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    expect(within(group).getByLabelText("Model")).toBeDefined();
+  });
+
+  it("choosing a different model updates agentPreference[0] and preserves the fallback entries behind it", async () => {
+    const onChange = vi.fn();
+    const stepWithFallback: WorkflowStepDraft[] = [
+      {
+        ...makeStep("step-1", "Research"),
+        agentPreference: [
+          { kind: "pinned" as const, adapterId: "claude-code" as const, modelId: "claude-haiku-4-5",
+            contextVariant: "default" as const, effort: null },
+          { kind: "pinned" as const, adapterId: "codex" as const, modelId: "gpt-5",
+            contextVariant: "default" as const, effort: null },
+        ],
+      },
+    ];
+    render(<StepEditor steps={stepWithFallback} onChange={onChange} />);
+
+    fireEvent.click(screen.getByTitle("Edit details"));
+    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const modelSelect = within(group).getByLabelText("Model");
+
+    fireEvent.change(modelSelect, { target: { value: "claude-opus-5::default" } });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next: WorkflowStepDraft[] = onChange.mock.calls[0][0];
+    expect(next[0].agentPreference[0]).toMatchObject({ modelId: "claude-opus-5", contextVariant: "default" });
+    expect(next[0].agentPreference[1]).toEqual(stepWithFallback[0].agentPreference[1]);
+  });
+
+  it("still renders instructions and output schema when the catalog fetch rejects", async () => {
+    getModelCatalogMock.mockReset();
+    getModelCatalogMock.mockRejectedValue(new Error("network down"));
+
+    const onChange = vi.fn();
+    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    fireEvent.click(screen.getAllByTitle("Edit details")[0]);
+
+    await waitFor(() => expect(getModelCatalogMock).toHaveBeenCalled());
+
+    const textarea = screen.getByLabelText("Step 1 instructions");
+    fireEvent.change(textarea, { target: { value: "Still works." } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/output schema/i)).toBeDefined();
+  });
+
+  it("does not crash when the catalog has no models", async () => {
+    getModelCatalogMock.mockReset();
+    getModelCatalogMock.mockResolvedValue({
+      adapters: [{ adapterId: "claude-code", adapterVersion: null, source: "seed", models: [] }],
+      profiles: [],
+    });
+
+    render(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+    fireEvent.click(screen.getAllByTitle("Edit details")[0]);
+
+    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    expect(within(group).getByLabelText("Model")).toBeDefined();
+
+    // Toggling to "Profile" mode with zero profiles must not throw on an empty array index.
+    fireEvent.click(within(group).getByRole("radio", { name: /profile/i }));
   });
 });

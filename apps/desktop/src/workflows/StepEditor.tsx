@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { CreateWorkflowTemplateRequest } from "@orca/contracts";
+import type { CatalogModel, CreateWorkflowTemplateRequest } from "@orca/contracts";
+import { getModelCatalog, type ModelCatalogProfile } from "../api";
+import { ModelPicker } from "./ModelPicker";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
 import { CloseIcon, PlusIcon } from "./icons";
 
@@ -85,6 +87,32 @@ export function StepEditor({
   // (not index) so reorder/removal can't leave a stale entry behind.
   const [invalidStepIds, setInvalidStepIds] = useState<Set<string>>(() => new Set());
   const dragIdx = useRef<number | null>(null);
+
+  // Fetched once for the whole step list, not per row's picker. A fetch
+  // failure degrades to an empty catalog rather than blanking the editor —
+  // Instructions and Output schema stay usable either way.
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
+  const [catalogProfiles, setCatalogProfiles] = useState<ModelCatalogProfile[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getModelCatalog()
+      .then((response) => {
+        if (cancelled) return;
+        setCatalogModels(response.adapters.flatMap((a) => a.models));
+        setCatalogProfiles(response.profiles);
+      })
+      .catch(() => {
+        // non-fatal — the model picker just offers no choices until a refresh
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Report aggregate validity upward; prune ids for steps that no longer exist.
   useEffect(() => {
@@ -376,6 +404,33 @@ export function StepEditor({
                       boxSizing: "border-box",
                     }}
                   />
+                </div>
+
+                {/* Model */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 10,
+                      color: "var(--text-3)",
+                      textTransform: "uppercase",
+                      letterSpacing: 1.2,
+                    }}
+                  >
+                    Model
+                  </span>
+                  <div role="group" aria-label={`Step ${i + 1} model`}>
+                    <ModelPicker
+                      value={step.agentPreference[0]}
+                      catalog={catalogModels}
+                      profiles={catalogProfiles}
+                      onChange={(next) =>
+                        updateStep(i, { agentPreference: [next, ...step.agentPreference.slice(1)] })
+                      }
+                      disabled={disabled || catalogLoading}
+                      idPrefix={`${step.id}-`}
+                    />
+                  </div>
                 </div>
 
                 {/* Output schema */}

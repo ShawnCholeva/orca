@@ -18,6 +18,15 @@ vi.mock("./api", () => ({
   createTemplate: (...args: unknown[]) => createTemplateMock(...args),
 }));
 
+const getModelCatalogMock = vi.fn();
+vi.mock("../api", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../api")>();
+  return {
+    ...mod,
+    getModelCatalog: (...args: unknown[]) => getModelCatalogMock(...args),
+  };
+});
+
 const now = "2026-01-01T00:00:00.000Z";
 
 function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTemplate {
@@ -82,6 +91,8 @@ describe("TemplateDetail", () => {
     duplicateTemplateMock.mockReset();
     saveTemplateMock.mockReset();
     createTemplateMock.mockReset();
+    getModelCatalogMock.mockReset();
+    getModelCatalogMock.mockResolvedValue({ adapters: [], profiles: [] });
   });
 
   // ── Locked / built-in ──────────────────────────────────────────────────────

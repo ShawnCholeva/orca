@@ -5,14 +5,21 @@ interface Profile {
   displayName: string;
 }
 
-export function ModelPicker({ value, catalog, profiles, onChange }: {
+export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPrefix = "" }: {
   value: NodeModelSelection;
   catalog: CatalogModel[];
   profiles: Profile[];
   onChange: (next: NodeModelSelection) => void;
+  disabled?: boolean;
+  // Distinguishes this picker's element ids when several are mounted at once
+  // (one per step in the step editor). Empty by default so a lone picker
+  // (e.g. in tests) keeps plain "model-select"/"effort-select" ids.
+  idPrefix?: string;
 }) {
   const isPinned = value.kind === "pinned";
   const model = isPinned ? catalog.find((m) => m.id === value.modelId) : undefined;
+  const modelSelectId = `${idPrefix}model-select`;
+  const effortSelectId = `${idPrefix}effort-select`;
 
   const rows = catalog.flatMap((m) => [
     { key: `${m.id}::default`, label: m.displayName },
@@ -24,8 +31,9 @@ export function ModelPicker({ value, catalog, profiles, onChange }: {
       <label>
         <input
           type="radio"
-          name="model-kind"
+          name={`${idPrefix}model-kind`}
           checked={isPinned}
+          disabled={disabled}
           onChange={() => {
             const first = catalog[0];
             onChange({
@@ -42,8 +50,9 @@ export function ModelPicker({ value, catalog, profiles, onChange }: {
       <label>
         <input
           type="radio"
-          name="model-kind"
+          name={`${idPrefix}model-kind`}
           checked={!isPinned}
+          disabled={disabled}
           onChange={() => onChange({ kind: "profile", ref: profiles[0]?.id ?? "" })}
         />
         Profile
@@ -51,10 +60,11 @@ export function ModelPicker({ value, catalog, profiles, onChange }: {
 
       {isPinned ? (
         <>
-          <label htmlFor="model-select">Model</label>
+          <label htmlFor={modelSelectId}>Model</label>
           <select
-            id="model-select"
+            id={modelSelectId}
             value={`${value.modelId}::${value.contextVariant}`}
+            disabled={disabled}
             onChange={(e) => {
               const [modelId, variant] = e.target.value.split("::") as [string, ContextVariant];
               const next = catalog.find((m) => m.id === modelId);
@@ -73,10 +83,11 @@ export function ModelPicker({ value, catalog, profiles, onChange }: {
 
           {model && model.supportedEfforts.length > 0 && (
             <>
-              <label htmlFor="effort-select">Effort</label>
+              <label htmlFor={effortSelectId}>Effort</label>
               <select
-                id="effort-select"
+                id={effortSelectId}
                 value={value.effort ?? model.defaultEffort ?? ""}
+                disabled={disabled}
                 onChange={(e) => onChange({ ...value, effort: e.target.value as EffortLevel })}
               >
                 {model.supportedEfforts.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
@@ -88,6 +99,7 @@ export function ModelPicker({ value, catalog, profiles, onChange }: {
         <select
           aria-label="Profile"
           value={value.ref}
+          disabled={disabled}
           onChange={(e) => onChange({ kind: "profile", ref: e.target.value })}
         >
           {profiles.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
