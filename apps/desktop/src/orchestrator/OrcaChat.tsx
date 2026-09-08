@@ -5,12 +5,14 @@ import type {
   Goal,
   GoalDetailResponse,
   OrchestratorChatMessage,
+  StepAgentChoice,
   WorkflowArtifact,
   WorkflowDecisionTrace,
   WorkflowRun,
   WorkflowStepRun,
   WorkflowTemplate,
 } from "@orca/contracts";
+import { asPinned } from "@orca/contracts";
 
 import type { ConnectionStatus } from "../api";
 import {
@@ -608,11 +610,21 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
       gatesAfterStep.set(inEdge.from, list);
     }
   }
+  // The tracker's role badge only has room for one label. A pinned choice shows
+  // its adapter id (unchanged); a profile-configured step has no adapterId (the
+  // daemon resolves it), so it shows the profile ref instead of silently
+  // showing nothing.
+  const choiceRole = (choice: StepAgentChoice | undefined): string | undefined => {
+    if (!choice) return undefined;
+    const pinned = asPinned(choice);
+    if (pinned) return pinned.adapterId;
+    return choice.kind === "profile" ? `profile:${choice.ref}` : undefined;
+  };
   type TrackerItemSrc = { item: TrackerStep; stepId?: string; gateId?: string; anchorStepId: string };
   const trackerSrc: TrackerItemSrc[] = [];
   for (const step of sortedSteps) {
     trackerSrc.push({
-      item: { kind: "step", name: step.name, role: step.agentPreference?.[0]?.adapterId },
+      item: { kind: "step", name: step.name, role: choiceRole(step.agentPreference?.[0]) },
       stepId: step.id,
       anchorStepId: step.id,
     });
@@ -621,7 +633,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
         item: {
           kind: "gate",
           name: gate.name || "Gate",
-          role: gate.evalSubstrate === "worker" ? gate.agentPreference?.[0]?.adapterId : undefined,
+          role: gate.evalSubstrate === "worker" ? choiceRole(gate.agentPreference?.[0]) : undefined,
         },
         gateId: gate.id,
         anchorStepId: step.id,

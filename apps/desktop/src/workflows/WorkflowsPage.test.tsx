@@ -50,7 +50,15 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
         name: "Intake",
         instructions: "Clarify work with the user.",
         outputSchema: [{ key: "goal_brief", type: "string", required: true }],
-        agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
+        agentPreference: [
+          {
+            kind: "pinned" as const,
+            adapterId: "claude-code" as const,
+            modelId: "claude-haiku-4-5",
+            contextVariant: "default" as const,
+            effort: null,
+          },
+        ],
       },
     ],
     guardrails: [],

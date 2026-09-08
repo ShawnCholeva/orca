@@ -39,7 +39,15 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
           { key: "summary", type: "string", required: true },
           { key: "files_identified", type: "number", required: false },
         ],
-        agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
+        agentPreference: [
+          {
+            kind: "pinned" as const,
+            adapterId: "claude-code" as const,
+            modelId: "claude-haiku-4-5",
+            contextVariant: "default" as const,
+            effort: null,
+          },
+        ],
       },
       {
         id: "step-2",
@@ -47,7 +55,15 @@ function makeTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTempla
         name: "Build",
         instructions: "Implement the solution based on research.",
         outputSchema: [{ key: "result", type: "string", required: true }],
-        agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
+        agentPreference: [
+          {
+            kind: "pinned" as const,
+            adapterId: "claude-code" as const,
+            modelId: "claude-haiku-4-5",
+            contextVariant: "default" as const,
+            effort: null,
+          },
+        ],
       },
     ],
     guardrails: [],

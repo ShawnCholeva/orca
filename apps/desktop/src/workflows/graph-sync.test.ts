@@ -9,7 +9,15 @@ function makeStep(id: string, name = id): WorkflowStepDraft {
     name,
     instructions: "",
     outputSchema: [{ key: "result", type: "string" as const, required: true }],
-    agentPreference: [{ adapterId: "claude-code" as const, modelId: "claude-haiku-4-5" }],
+    agentPreference: [
+      {
+        kind: "pinned" as const,
+        adapterId: "claude-code" as const,
+        modelId: "claude-haiku-4-5",
+        contextVariant: "default" as const,
+        effort: null,
+      },
+    ],
   };
 }
 

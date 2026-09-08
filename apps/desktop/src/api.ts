@@ -7,11 +7,13 @@ import {
   AppSettings,
   type PutSettingsRequest,
   AcceptRecommendationResponse,
+  type AdapterId,
   Agent,
   ListAgentsResponse,
   UpdateAgentResponse,
   ArchiveGoalResponse,
   AssociateTaskSessionRequest,
+  type CatalogModel,
   AssociateTaskSessionResponse,
   AttachGoalDocumentRequest,
   AttachGoalDocumentResponse,
@@ -861,6 +863,32 @@ export async function listModelProviders(): Promise<ListModelProvidersResponse["
     "List model providers failed",
   );
   return body.providers;
+}
+
+export interface ModelCatalogAdapter {
+  adapterId: AdapterId;
+  adapterVersion: string | null;
+  source: "extracted" | "cached" | "seed";
+  models: CatalogModel[];
+}
+
+export interface ModelCatalogProfile {
+  id: string;
+  displayName: string;
+}
+
+export interface ModelCatalogResponse {
+  adapters: ModelCatalogAdapter[];
+  profiles: ModelCatalogProfile[];
+}
+
+export async function getModelCatalog(): Promise<ModelCatalogResponse> {
+  const { baseUrl, token } = await loadConfig();
+  const res = await fetch(`${baseUrl}/v1/model-catalog`, { headers: authHeaders(token) });
+  if (!res.ok) {
+    throw new ApiError(`Get model catalog failed (${res.status})`);
+  }
+  return res.json();
 }
 
 export async function updateGoalOrchestratorModel(
