@@ -56,6 +56,7 @@ import {
   type GoalMemoryItem,
   type GoalDecision,
   type ModelProviderId,
+  type ResolvedModelChoice,
   CheckReadinessAllResponse,
   CheckReadinessOneResponse,
   type PendingQuestionItem,
@@ -840,15 +841,15 @@ export function createServer(
     },
   });
 
-  const workerSpawnFn = async ({ sessionId, goalId, adapterId }: { sessionId: string; goalId: string; adapterId: string }) => {
+  const workerSpawnFn = async ({ sessionId, goalId, adapterId, model }: { sessionId: string; goalId: string; adapterId: string; model?: ResolvedModelChoice }) => {
     const wsRow = db.prepare("SELECT w.path AS path FROM workspaces w JOIN goal_workspaces gw ON gw.workspace_id = w.id WHERE gw.goal_id = ? ORDER BY gw.attached_at ASC LIMIT 1").get(goalId) as { path: string } | undefined;
     if (!wsRow) { console.warn(`[orchestrator] workerSpawn: no workspace for goal ${goalId}`); return; }
     const adapter = adapterRegistry.get(adapterId);
     if (!adapter) { console.warn(`[orchestrator] workerSpawn: no adapter ${adapterId}`); return; }
-    const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path });
+    const spawn = await adapter.resolveSpawn({ goalId, sessionId, workspacePath: wsRow.path, model });
     // Containment seam (identity today): see adapters/sandbox.ts.
     const sandboxed = noopSandbox.wrap(spawn);
-    await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, env: sandboxed.env });
+    await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, args: sandboxed.args, env: sandboxed.env });
   };
   const baseWorkerDeliver = deps?.workerDeliver ?? ((sessionId: string, text: string) => workerSessions.deliver(sessionId, text));
   // Every prompt a worker receives — the objective, a forward, a revision, recovery

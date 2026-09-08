@@ -43,7 +43,7 @@ describe("WorkerSessionManager.isTmuxAlive", () => {
       hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(await mgr.isTmuxAlive("sess-1")).toBe(true);
   });
 
@@ -67,7 +67,7 @@ describe("WorkerSessionManager.isTmuxAlive", () => {
       hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux: deadTmux, captureSink: () => {},
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(deadTmux.calls.filter((c) => c[0] === "new-session")).toHaveLength(1);
 
     expect(await mgr.isTmuxAlive("sess-1")).toBe(false);
@@ -77,7 +77,7 @@ describe("WorkerSessionManager.isTmuxAlive", () => {
     // be a silent no-op (no second new-session call) — respawning a worker whose
     // tmux session is dead would be impossible. It DOES respawn, so the entry
     // was evicted.
-    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(deadTmux.calls.filter((c) => c[0] === "new-session")).toHaveLength(2);
   });
 });
@@ -92,7 +92,7 @@ describe("WorkerSessionManager.spawn", () => {
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: { HOME: "/home/u" } });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: { HOME: "/home/u" } });
     // private settings written, NOT under /repo
     expect(existsSync(join(privateRoot, "sess-1", "settings.json"))).toBe(true);
     const settings = JSON.parse(readFileSync(join(privateRoot, "sess-1", "settings.json"), "utf8"));
@@ -122,7 +122,7 @@ describe("WorkerSessionManager.spawn", () => {
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
-    await mgr.spawn({ sessionId: "s1", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "s1", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", args: [], env: {} });
     // file written under privateRoot/s1/
     expect(existsSync(join(privateRoot, "s1", "settings.json"))).toBe(true);
     expect(readFileSync(join(privateRoot, "s1", "settings.json"), "utf8")).toBe('{"hooks":{}}');
@@ -147,7 +147,7 @@ describe("WorkerSessionManager.spawn", () => {
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
-    await mgr.spawn({ sessionId: "s-space", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "s-space", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", args: [], env: {} });
     const newSess = tmux.calls.find((c) => c[0] === "new-session")!;
     const cmd = newSess.join(" ");
     // The path with a space must appear JSON-quoted (double-quoted) so sh -c doesn't word-split it
@@ -171,7 +171,7 @@ describe("WorkerSessionManager.spawn", () => {
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
-    await mgr.spawn({ sessionId: "s-nested", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "s-nested", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", args: [], env: {} });
     expect(existsSync(join(privateRoot, "s-nested", ".codex", "hooks.json"))).toBe(true);
     expect(readFileSync(join(privateRoot, "s-nested", ".codex", "hooks.json"), "utf8")).toBe("{}");
   });
@@ -199,7 +199,7 @@ describe("WorkerSessionManager.spawn", () => {
       claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 50, pollMs: 1, readyQuietMs: 0,
       resolveProvider: (_adapterId) => fakeProvider,
     });
-    await mgr.spawn({ sessionId: "s-copy", goalId: "g1", adapterId: "codex", workspacePath: "/ws", command: "codex", env: {} });
+    await mgr.spawn({ sessionId: "s-copy", goalId: "g1", adapterId: "codex", workspacePath: "/ws", command: "codex", args: [], env: {} });
     // existing source copied into the private config dir
     expect(existsSync(join(privateRoot, "s-copy", "auth.json"))).toBe(true);
     expect(readFileSync(join(privateRoot, "s-copy", "auth.json"), "utf8")).toBe('{"token":"abc"}');
@@ -220,7 +220,7 @@ describe("WorkerSessionManager.startTail", () => {
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     const paneFile = join(privateRoot, "sess-1", "pane.out");
     appendFileSync(paneFile, "hello-pane");
     await vi.waitFor(
@@ -344,7 +344,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     const result = await mgr.deliver("sess-1", "do the thing\nplease");
     expect(result).toBe("delivered");
     const order = tmux.calls.map((c) => c[0]);
@@ -371,7 +371,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider: (_adapterId) => codexProvider,
     });
-    await mgr.spawn({ sessionId: "cx", goalId: "g1", adapterId: "codex", workspacePath: "/repo", command: "codex", env: {} });
+    await mgr.spawn({ sessionId: "cx", goalId: "g1", adapterId: "codex", workspacePath: "/repo", command: "codex", args: [], env: {} });
     expect(await mgr.deliver("cx", "do the thing")).toBe("delivered");
   });
 
@@ -399,7 +399,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-churn", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-churn", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(await mgr.deliver("sess-churn", "b")).toBe("delivered");
   });
 
@@ -440,7 +440,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-welcome", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-welcome", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(await mgr.deliver("sess-welcome", "the objective")).toBe("delivered");
   });
 
@@ -459,7 +459,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-deco", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-deco", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(await mgr.deliver("sess-deco", "the objective")).toBe("delivered");
   });
 
@@ -478,7 +478,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-spin", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-spin", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(await mgr.deliver("sess-spin", "the objective")).toBe("delivered");
     // First capture (spinner) was busy → deliver waited and pasted only on the idle frame.
     const pastes = tmux.calls.filter((c) => c[0] === "paste-buffer").length;
@@ -507,7 +507,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-stuck", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-stuck", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(await mgr.deliver("sess-stuck", "Under every workspace it's attached to")).toBe("delivered");
     const ends = tmux.calls.filter((c) => c[0] === "send-keys" && c[3] === "End").length;
     const enters = tmux.calls.filter((c) => c[0] === "send-keys" && c[3] === "Enter").length;
@@ -536,7 +536,7 @@ describe("WorkerSessionManager.deliver", () => {
       idleQuietMs: 0, postPasteMs: 0, idleTimeoutMs: 50,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-ph", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-ph", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(await mgr.deliver("sess-ph", "my real answer")).toBe("delivered");
     // The composer is cleared (C-u) before the paste, so the answer can't append
     // to any leftover text.
@@ -665,7 +665,7 @@ describe("WorkerSessionManager.reattach", () => {
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
-    await expect(mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} })).resolves.not.toThrow();
+    await expect(mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} })).resolves.not.toThrow();
     await mgr.terminate("sess-1");
   });
 
@@ -680,7 +680,7 @@ describe("WorkerSessionManager.reattach", () => {
       startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-2", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-2", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     expect(marked).toContain("sess-2");
     await mgr.terminate("sess-2");
   });
@@ -696,7 +696,7 @@ describe("WorkerSessionManager.waitForProviderReset", () => {
       captureSink: () => {}, startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
       resolveProvider,
     });
-    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "sess-1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     await mgr.waitForProviderReset("sess-1", "claude-code");
     expect(tmux.calls).toContainEqual([
       "send-keys",
@@ -799,7 +799,7 @@ describe("WorkerSessionManager startup — trust prompt", () => {
 
   it("moves the highlight onto the affirmative row and never confirms on 'No, exit'", async () => {
     const { tmux, mgr } = mgrWith([TRUST_NO_SELECTED, TRUST_YES_SELECTED, READY]);
-    await mgr.spawn({ sessionId: "s1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "s1", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     await waitFor(() => keys(tmux).includes("Enter"));
     const sent = keys(tmux);
     // The FIRST key must be the move, not the confirm — confirming first is the bug.
@@ -811,7 +811,7 @@ describe("WorkerSessionManager startup — trust prompt", () => {
     // Trust TEXT is on screen but no yes/no rows yet: the highlight position is
     // unknowable, and a guess costs the session.
     const { tmux, mgr } = mgrWith(["Do you trust the files in this folder?"]);
-    await mgr.spawn({ sessionId: "s2", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "s2", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     await waitFor(() => tmux.calls.filter((c) => c[0] === "capture-pane").length >= 3);
     expect(keys(tmux)).toHaveLength(0);
   });
@@ -821,8 +821,64 @@ describe("WorkerSessionManager startup — trust prompt", () => {
     // first, startup would return with the menu still open and deliver() would
     // paste the step prompt into a modal dialog.
     const { tmux, mgr } = mgrWith([TRUST_NO_SELECTED, TRUST_YES_SELECTED, READY]);
-    await mgr.spawn({ sessionId: "s3", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", env: {} });
+    await mgr.spawn({ sessionId: "s3", goalId: "g1", adapterId: "claude-code", workspacePath: "/repo", command: "claude", args: [], env: {} });
     await waitFor(() => keys(tmux).includes("Enter"));
     expect(keys(tmux).filter((k) => k === "Enter")).toHaveLength(1);
+  });
+});
+
+describe("WorkerSessionManager.spawn — model args", () => {
+  function mgrWithSpawnArgs(spawnArgs: string[]) {
+    const tmux = fakeTmux(["auto mode on"]);
+    const fakeProvider = {
+      workerHookConfig: () => ({ files: [], spawnArgs }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"],
+      claudeBin: "claude", tmux, captureSink: () => {}, startupTimeoutMs: 1, pollMs: 1, readyQuietMs: 0,
+      resolveProvider: (_adapterId) => fakeProvider,
+    });
+    return { tmux, mgr };
+  }
+  const newSessionCommand = (tmux: { calls: string[][] }) =>
+    tmux.calls.find((c) => c[0] === "new-session")!.at(-1)!;
+
+  it("puts the model args into the tmux command", async () => {
+    const { tmux, mgr } = mgrWithSpawnArgs([]);
+    await mgr.spawn({
+      sessionId: "m1", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws",
+      command: "/bin/claude", env: {}, args: ["--model", "claude-opus-5", "--effort", "high"],
+    });
+    expect(newSessionCommand(tmux)).toContain("--model claude-opus-5 --effort high");
+  });
+
+  it("keeps the provider's own spawn args alongside the model args", async () => {
+    const { tmux, mgr } = mgrWithSpawnArgs(["--settings", "/cfg/settings.json"]);
+    await mgr.spawn({
+      sessionId: "m2", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws",
+      command: "/bin/claude", env: {}, args: ["--model", "claude-opus-5"],
+    });
+    const cmd = newSessionCommand(tmux);
+    expect(cmd).toContain("--settings /cfg/settings.json");
+    expect(cmd).toContain("--model claude-opus-5");
+  });
+
+  it("spawns without model args when none were resolved", async () => {
+    const { tmux, mgr } = mgrWithSpawnArgs([]);
+    await mgr.spawn({
+      sessionId: "m3", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws",
+      command: "/bin/claude", env: {}, args: [],
+    });
+    expect(newSessionCommand(tmux)).not.toContain("--model");
+  });
+
+  it("quotes a 1m model id so the shell cannot glob-expand its brackets", async () => {
+    const { tmux, mgr } = mgrWithSpawnArgs([]);
+    await mgr.spawn({
+      sessionId: "m4", goalId: "g1", adapterId: "claude-code", workspacePath: "/tmp/ws",
+      command: "/bin/claude", env: {}, args: ["--model", "claude-opus-5[1m]", "--effort", "high"],
+    });
+    expect(newSessionCommand(tmux)).toContain('"claude-opus-5[1m]"');
   });
 });

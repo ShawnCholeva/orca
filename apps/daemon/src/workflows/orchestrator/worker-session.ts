@@ -71,6 +71,8 @@ export interface WorkerSpawnInput {
   adapterId: string;
   workspacePath: string;
   command: string;            // resolved claude binary (from adapter.resolveSpawn)
+  /** Adapter args (model + effort) from resolveSpawn. Empty when none resolved. */
+  args: string[];
   env: Record<string, string>; // adapter env (already secret-sanitized; carries HOME for auth)
 }
 
@@ -162,11 +164,15 @@ export class WorkerSessionManager {
       copyFileSync(cp.sourcePath, target);
     }
     const name = this.name(input.sessionId);
-    // tmux runs this command string via `sh -c`, so quote any token containing
-    // whitespace (e.g. a settings path under a data dir with spaces). JSON.stringify
-    // matches the quoting the pre-seam code used.
-    const command = [input.command, ...hookCfg.spawnArgs]
-      .map((token) => (/\s/.test(token) ? JSON.stringify(token) : token))
+    // tmux runs this command string via `sh -c`, so quote any token that isn't
+    // plainly safe unquoted. A 1m model id like "claude-opus-5[1m]" contains
+    // shell glob metacharacters ([ ]) that sh -c will attempt to expand against
+    // the workspace cwd — quoting only whitespace-bearing tokens (the old rule)
+    // missed this and could silently rewrite the model id. JSON.stringify matches
+    // the quoting the pre-seam code used.
+    const SAFE_UNQUOTED = /^[A-Za-z0-9_.:=/-]+$/;
+    const command = [input.command, ...input.args, ...hookCfg.spawnArgs]
+      .map((token) => (SAFE_UNQUOTED.test(token) ? token : JSON.stringify(token)))
       .join(" ");
     const env = { ...input.env, ...(hookCfg.env ?? {}), [TMUX_OWNER_VAR]: this.owner() };
     await newSession(this.tmux, name, input.workspacePath, command, env);

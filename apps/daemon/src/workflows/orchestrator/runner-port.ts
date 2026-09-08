@@ -1,3 +1,4 @@
+import type { ResolvedModelChoice } from "@orca/contracts";
 import type { SessionOutputStore } from "../../sessions/output-store.js";
 import type { WorkflowSessionLauncher } from "./session-launcher.js";
 
@@ -9,7 +10,7 @@ import type { WorkflowSessionLauncher } from "./session-launcher.js";
  */
 export interface RunnerPort {
   launch: WorkflowSessionLauncher["launch"];
-  workerSpawn: (input: { sessionId: string; goalId: string; adapterId: string }) => Promise<void>;
+  workerSpawn: (input: { sessionId: string; goalId: string; adapterId: string; model?: ResolvedModelChoice }) => Promise<void>;
   workerDeliver: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">;
   workerWait: (sessionId: string, adapterId: string) => Promise<void>;
   readTail: SessionOutputStore["readTail"];
