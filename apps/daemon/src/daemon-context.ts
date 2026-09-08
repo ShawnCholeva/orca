@@ -14,8 +14,8 @@ import { adapterRegistry } from './adapters/registry.js';
 import { resolveBinary } from './adapters/resolve.js';
 import { extractClaudeCatalog } from './adapters/model-catalog/extract-claude.js';
 import { SEED_PROFILES } from './adapters/model-catalog/profiles.js';
-import { loadCatalog } from './adapters/model-catalog/store.js';
-import type { AdapterId, CatalogModel } from '@orca/contracts';
+import { loadCatalog, type LoadedCatalog } from './adapters/model-catalog/store.js';
+import type { AdapterId } from '@orca/contracts';
 import { ModelProviderRegistry } from './llm/registry.js';
 import { createAnthropicProvider } from './llm/anthropic.js';
 import { createOpenAIProvider } from './llm/openai.js';
@@ -62,26 +62,31 @@ async function claudeBinaryPath(): Promise<string | null> {
  * cached in the DB. Only claude-code can be extracted today; every other adapter
  * falls through to the checked-in seed inside loadCatalog.
  */
-async function loadAdapterCatalog(
+export async function loadAdapterCatalog(
   db: Database.Database,
   adapterId: AdapterId,
-  now: () => string
-): Promise<CatalogModel[]> {
+  now: () => string,
+  opts?: { force?: boolean }
+): Promise<LoadedCatalog> {
   const adapter = adapterRegistry.get(adapterId);
-  const loaded = await loadCatalog(db, adapterId, {
-    version: async () => {
-      if (!adapter) return null;
-      const installed = await adapter.checkInstalled();
-      return installed.ok ? (installed.version ?? null) : null;
+  return loadCatalog(
+    db,
+    adapterId,
+    {
+      version: async () => {
+        if (!adapter) return null;
+        const installed = await adapter.checkInstalled();
+        return installed.ok ? (installed.version ?? null) : null;
+      },
+      extract: async () => {
+        if (adapterId !== 'claude-code') return [];
+        const binary = await claudeBinaryPath();
+        return binary ? extractClaudeCatalog(binary) : [];
+      },
+      now,
     },
-    extract: async () => {
-      if (adapterId !== 'claude-code') return [];
-      const binary = await claudeBinaryPath();
-      return binary ? extractClaudeCatalog(binary) : [];
-    },
-    now,
-  });
-  return loaded.models;
+    opts
+  );
 }
 
 function createDefaultModelProviderRegistry(): ModelProviderRegistry {
@@ -108,7 +113,7 @@ export function createDaemonContext(db: Database.Database, bus: EventBus): Daemo
       const report = await readinessService.checkAgent(adapterId);
       return report.status === "ready";
     },
-    catalogFor: (adapterId) => loadAdapterCatalog(db, adapterId, now),
+    catalogFor: (adapterId) => loadAdapterCatalog(db, adapterId, now).then((loaded) => loaded.models),
     profiles: SEED_PROFILES,
     resolveMode: (adapterId) => adapterDispatcher.resolveMode(adapterId),
   };

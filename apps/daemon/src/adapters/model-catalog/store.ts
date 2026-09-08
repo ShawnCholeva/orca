@@ -50,11 +50,12 @@ export async function loadCatalog(
   db: Database.Database,
   adapterId: AdapterId,
   deps: LoadCatalogDeps,
+  opts?: { force?: boolean },
 ): Promise<LoadedCatalog> {
   const version = await deps.version();
 
   if (version) {
-    const cached = readCachedCatalog(db, adapterId, version);
+    const cached = opts?.force ? null : readCachedCatalog(db, adapterId, version);
     if (cached && cached.length > 0) {
       return { models: cached, source: "cached", adapterVersion: version };
     }

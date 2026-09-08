@@ -192,7 +192,8 @@ import {
 import type { SessionPreparationAssembler } from './context/assembler.js';
 import { registerContextRoutes } from './context/routes.js';
 import { registerAdapterExecutionModeRoutes } from './adapters/execution-modes-routes.js';
-import { createDaemonContext, type DaemonContext } from './daemon-context.js';
+import { registerModelCatalogRoutes } from './adapters/model-catalog/routes.js';
+import { createDaemonContext, loadAdapterCatalog, type DaemonContext } from './daemon-context.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerRecommendationRoutes } from './recommendations/routes.js';
 import { registerConflictRoutes } from './conflicts/routes.js';
@@ -1776,6 +1777,13 @@ export function createServer(
       bus: eventBus,
     });
   }
+
+  // ---- Model catalog routes ----
+
+  registerModelCatalogRoutes(server, {
+    db,
+    load: (database, adapterId, opts) => loadAdapterCatalog(database, adapterId, daemonContext.now, opts),
+  });
 
   // ---- Workflow template routes ----
 
