@@ -64,7 +64,7 @@ export interface NodeDetailModalProps {
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
   catalog?: CatalogEntry[];
   profiles?: ModelCatalogProfile[];
-  agents?: Agent[];
+  agents?: Agent[] | null;
   catalogLoading?: boolean;
 }
 
@@ -80,7 +80,7 @@ export function NodeDetailModal({
   onOutputSchemaValidityChange,
   catalog = [],
   profiles = [],
-  agents = [],
+  agents = null,
   catalogLoading = false,
 }: NodeDetailModalProps) {
   const isGate = detail.kind === "gate";
@@ -279,7 +279,7 @@ function GateBody({
   readOnly?: boolean;
   catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
-  agents: Agent[];
+  agents: Agent[] | null;
   catalogLoading?: boolean;
 }) {
   return (
@@ -501,7 +501,7 @@ function StepBody({
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
   catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
-  agents: Agent[];
+  agents: Agent[] | null;
   catalogLoading?: boolean;
 }) {
   return (

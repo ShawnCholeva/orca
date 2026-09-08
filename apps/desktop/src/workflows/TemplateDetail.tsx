@@ -145,8 +145,11 @@ export function TemplateDetail({
   const [catalogLoading, setCatalogLoading] = useState(true);
   // Drives the Provider dropdown in ModelPicker: which adapters are actually
   // connected (Settings → Manage Agents), fetched alongside the catalog since
-  // both surfaces need it together.
-  const [agents, setAgents] = useState<Agent[]>([]);
+  // both surfaces need it together. Starts (and stays, on fetch failure) at
+  // `null` — "not loaded yet" is a distinct, weaker claim than "loaded and
+  // empty", and ModelPicker relies on that distinction to avoid asserting a
+  // provider is disconnected before it actually knows.
+  const [agents, setAgents] = useState<Agent[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;

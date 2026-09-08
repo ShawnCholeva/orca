@@ -166,4 +166,75 @@ describe("ModelPicker", () => {
     expect((screen.getByLabelText("Provider") as HTMLSelectElement).disabled).toBe(true);
     expect((screen.getByLabelText("Model") as HTMLSelectElement).disabled).toBe(true);
   });
+
+  // ── Three distinguishable "unavailable" states ────────────────────────────
+  // Never collapse these into one another — each says something different,
+  // and only the first one may ever use the word "not connected".
+
+  it("state 1 — genuinely disconnected in Settings: labelled unavailable, points at the agent toggle", () => {
+    const agentsWithClaudeDisconnected: Agent[] = [
+      makeAgent({ id: "claude-code", name: "Claude Code", sortOrder: 10, connected: false }),
+      makeAgent({ id: "codex", name: "Codex CLI", sortOrder: 20, connected: true }),
+    ];
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={agentsWithClaudeDisconnected} onChange={() => {}} />);
+
+    expect(screen.getByRole("option", { name: "Claude Code (not connected)" })).toBeInTheDocument();
+    expect(screen.getByText(/won't dispatch until claude code is enabled in\s*settings/i)).toBeInTheDocument();
+  });
+
+  it("state 2 — connected but the catalog has no models for it: never says 'not connected', points at the catalog instead", () => {
+    // Reproduces the reviewer's repro: both agents connected, catalog empty.
+    const bothConnected: Agent[] = [
+      makeAgent({ id: "claude-code", name: "Claude Code", sortOrder: 10, connected: true }),
+      makeAgent({ id: "codex", name: "Codex CLI", sortOrder: 20, connected: true }),
+    ];
+    render(<ModelPicker value={pinned} catalog={[]} profiles={PROFILES} agents={bothConnected} onChange={() => {}} />);
+
+    // The provider is shown plainly — never labelled "(not connected)" when it is connected.
+    expect(screen.getByRole("option", { name: "Claude Code" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /not connected/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/won't dispatch/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/is enabled in settings/i)).not.toBeInTheDocument();
+
+    // Says something true about the catalog instead, pointing at the Models
+    // section (not the agent toggle).
+    expect(screen.getByText(/no models available.*models section in settings/i)).toBeInTheDocument();
+  });
+
+  it("state 3 — agents not yet loaded: claims nothing, never guesses '(not connected)'", () => {
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={null} onChange={() => {}} />);
+
+    // No status claim of any kind while we don't yet know who's connected.
+    expect(screen.queryByRole("option", { name: /not connected/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/won't dispatch/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no agents are connected/i)).not.toBeInTheDocument();
+
+    // The Provider control itself is disabled until the list is known, rather
+    // than let the user act on an incomplete guess.
+    expect((screen.getByLabelText("Provider") as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it("does not emit onChange when a late-arriving agent list turns a rerender into a real state change", () => {
+    // No useEffect exists in ModelPicker for exactly this reason: a rerender
+    // must never itself trigger a "fix up the value" onChange call, no matter
+    // what changed about `agents` between renders. This is the structural
+    // guarantee behind "a template is never silently rewritten by opening it".
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={null} onChange={onChange} />,
+    );
+    expect(onChange).not.toHaveBeenCalled();
+
+    rerender(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={AGENTS} onChange={onChange} />);
+    expect(onChange).not.toHaveBeenCalled();
+
+    // Also cover the case where the value's own provider turns out, once
+    // agents finally load, to be disconnected — still no onChange.
+    const claudeDisconnected: Agent[] = [
+      makeAgent({ id: "claude-code", name: "Claude Code", sortOrder: 10, connected: false }),
+      makeAgent({ id: "codex", name: "Codex CLI", sortOrder: 20, connected: true }),
+    ];
+    rerender(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} agents={claudeDisconnected} onChange={onChange} />);
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

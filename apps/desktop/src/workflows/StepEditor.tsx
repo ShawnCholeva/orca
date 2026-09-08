@@ -17,7 +17,7 @@ export interface StepListEditorProps {
   // catalog — Instructions and Output schema stay usable either way.
   catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
-  agents: Agent[];
+  agents: Agent[] | null;
   catalogLoading?: boolean;
 }
 

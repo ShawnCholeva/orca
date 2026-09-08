@@ -26,7 +26,10 @@ export function ModelPicker({ value, catalog, profiles, agents, onChange, disabl
   value: NodeModelSelection;
   catalog: CatalogEntry[];
   profiles: Profile[];
-  agents: Agent[];
+  // `null` means the agent list hasn't loaded yet — distinct from `[]`,
+  // which means it loaded and nothing is connected. Conflating the two would
+  // let a merely-not-loaded-yet provider get mislabelled as disconnected.
+  agents: Agent[] | null;
   onChange: (next: NodeModelSelection) => void;
   disabled?: boolean;
   // Distinguishes this picker's element ids when several are mounted at once
@@ -43,40 +46,57 @@ export function ModelPicker({ value, catalog, profiles, agents, onChange, disabl
   const effortSelectId = `${idPrefix}effort-select`;
   const noProfiles = profiles.length === 0;
 
+  const agentsLoaded = agents !== null;
+  const agentList = agents ?? [];
+
   // Providers offered are the agents the user has actually connected
   // (Settings → Manage Agents) that also ship at least one catalog model,
-  // ordered the same way Manage Agents orders them.
-  const connectedProviders = agents
-    .filter((a) => a.connected && catalog.some((m) => m.adapterId === a.id))
-    .slice()
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+  // ordered the same way Manage Agents orders them. Computed only once the
+  // agent list has actually loaded — before that we don't know who's
+  // connected, and an empty guess here would misreport every provider.
+  const connectedProviders = agentsLoaded
+    ? agentList
+        .filter((a) => a.connected && catalog.some((m) => m.adapterId === a.id))
+        .slice()
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+    : [];
 
-  // No agent connected at all — distinct from "connected but modelless",
-  // which the per-provider empty-model guard below already covers.
-  const noProviders = agents.filter((a) => a.connected).length === 0;
+  // No agent connected at all — distinct from "connected but modelless" (the
+  // per-provider empty-model guard below) and from "not loaded yet"
+  // (agentsLoaded false); neither of those licenses this message.
+  const noProviders = agentsLoaded && agentList.filter((a) => a.connected).length === 0;
 
   const currentAdapterId = isPinned ? value.adapterId : undefined;
-  const currentProviderConnected = currentAdapterId != null
-    ? connectedProviders.some((p) => p.id === currentAdapterId)
-    : true;
 
-  // A pinned choice whose provider was since disconnected (or removed from
-  // Settings) is kept visible, not silently rewritten — opening a template
-  // must never quietly change what it saves. It's appended as an extra,
-  // clearly-unavailable option so the Provider select still shows the truth.
-  const currentAgent = currentAdapterId != null ? agents.find((a) => a.id === currentAdapterId) : undefined;
-  const showUnavailableProvider = isPinned && currentAdapterId != null && !currentProviderConnected;
+  // The pinned choice's own agent record, looked up directly — NOT via
+  // connectedProviders membership, which also encodes "has a catalog model"
+  // and would misreport a connected-but-modelless provider as disconnected.
+  const currentAgentRecord = agentsLoaded && currentAdapterId != null
+    ? agentList.find((a) => a.id === currentAdapterId)
+    : undefined;
+  const currentAgentName = currentAgentRecord?.name ?? currentAdapterId;
 
-  const providerOptions: ProviderOption[] = [
-    ...connectedProviders.map((a) => ({ id: a.id as AdapterId, label: a.name, unavailable: false })),
-    ...(showUnavailableProvider
-      ? [{
-          id: currentAdapterId as AdapterId,
-          label: `${currentAgent?.name ?? currentAdapterId} (not connected)`,
-          unavailable: true,
-        }]
-      : []),
-  ];
+  // Three distinguishable states for the pinned choice's own provider —
+  // never collapse them, and never assert connectivity before agents load:
+  //   - genuinely disconnected in Settings (a Settings problem)
+  //   - connected, but the catalog has no models for it right now (a catalog
+  //     problem — the "no models" note below already says something true
+  //     about it, pointing at the Models section rather than the agent toggle)
+  //   - agents haven't loaded yet — say nothing about connectivity at all
+  const isGenuinelyDisconnected = agentsLoaded && currentAdapterId != null
+    && currentAgentRecord != null && !currentAgentRecord.connected;
+
+  const providerOptions: ProviderOption[] = connectedProviders.map((a) => (
+    { id: a.id as AdapterId, label: a.name, unavailable: false }
+  ));
+  if (isPinned && currentAdapterId != null && !connectedProviders.some((p) => p.id === currentAdapterId)) {
+    providerOptions.push(
+      isGenuinelyDisconnected
+        ? { id: currentAdapterId, label: `${currentAgentName} (not connected)`, unavailable: true }
+        // Either a catalog gap or not-yet-loaded — neither claims disconnection.
+        : { id: currentAdapterId, label: currentAgentName as string, unavailable: false },
+    );
+  }
 
   const selectedProviderId = currentAdapterId ?? (connectedProviders[0]?.id as AdapterId | undefined);
   const modelsForProvider = selectedProviderId
@@ -157,7 +177,7 @@ export function ModelPicker({ value, catalog, profiles, agents, onChange, disabl
             <select
               id={providerSelectId}
               value={currentAdapterId ?? ""}
-              disabled={disabled || noProviders}
+              disabled={disabled || noProviders || !agentsLoaded}
               onChange={(e) => {
                 const adapterId = e.target.value as AdapterId;
                 const models = catalog.filter((m) => m.adapterId === adapterId);
@@ -170,11 +190,14 @@ export function ModelPicker({ value, catalog, profiles, agents, onChange, disabl
             </select>
           </div>
 
-          {showUnavailableProvider && !noProviders && (
+          {isGenuinelyDisconnected && !noProviders && (
             // Skipped when noProviders is also true — the broader "no agents
             // connected" note above already explains why nothing will dispatch.
+            // Only ever shown for a *confirmed* disconnect (currentAgentRecord
+            // found and connected === false) — never for a catalog gap or an
+            // unloaded agent list, which say nothing here at all.
             <p className="model-picker__note model-picker__note--warn">
-              This step won't dispatch until {currentAgent?.name ?? currentAdapterId} is enabled in
+              This step won't dispatch until {currentAgentName} is enabled in
               Settings, or another provider is chosen.
             </p>
           )}
