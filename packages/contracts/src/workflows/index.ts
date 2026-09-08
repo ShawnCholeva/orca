@@ -334,6 +334,28 @@ export const ResolvedModelChoice = z
   .strict();
 export type ResolvedModelChoice = z.infer<typeof ResolvedModelChoice>;
 
+/**
+ * One model as Orca understands it. Field names are Orca's; the claude-code
+ * extractor (Task 4) maps the bundle's snake_case onto them so no other module
+ * depends on the bundle's shape.
+ */
+export const CatalogModel = z
+  .object({
+    id: z.string().min(1).max(80),
+    family: z.string().max(40),
+    displayName: z.string().min(1).max(80),
+    contextWindow: z.number().int().nonnegative(),
+    supports1mSuffix: z.boolean(),
+    /** Provider pricing tier string, e.g. "tier_5_25". Null where unknown. */
+    pricingTier: z.string().max(40).nullable(),
+    /** Higher is stronger. ORDERING ONLY — never an absolute score. */
+    advisorRank: z.number().nullable(),
+    supportedEfforts: z.array(EffortLevel),
+    defaultEffort: EffortLevel.nullable(),
+  })
+  .strict();
+export type CatalogModel = z.infer<typeof CatalogModel>;
+
 export const StepCompletionPolicy = z.enum(["interview", "reasoning", "handoff"]);
 export type StepCompletionPolicy = z.infer<typeof StepCompletionPolicy>;
 
