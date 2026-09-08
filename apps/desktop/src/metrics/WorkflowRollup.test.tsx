@@ -4,6 +4,7 @@ import type { Intervention, RunDetail, RunSummary, RunTraceSpan, SessionInterval
 import { Dashboard, RANGES, WorkflowRollup, activePerBucket, aggregate, bucketize, defaultIntervalFor, gatePeriodFor, intervalsFor, versionsOf, withinWindow, workflowsOf } from "./WorkflowRollup";
 import * as api from "../api";
 import { Donut, TimeBars, TimeLine } from "./dashboard-panels";
+import type { TimeBucket } from "./dashboard-panels";
 
 // Real timers restored here as well as in the tests: a failing assertion would
 // otherwise leave the next test on a faked clock, and useFakeTimers does not move
@@ -20,7 +21,7 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
     templateName: "Adaptive Delivery", templateVersion: 16, status: "completed",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T01:00:00.000Z",
     blockedReason: null, terminationCause: "infrastructure_killed", terminationEvidence: null,
-    durations: { elapsedMs: 10 * H, workingMs: H, parkedMs: 8 * H, unaccountedMs: H,
+    durations: { elapsedMs: 10 * H, workingMs: H, parkedMs: 8 * H, unaccountedMs: H, agentMs: 0, haltedMs: 0, reviewingMs: 0,
                  spanActiveMs: 0, accruing: false, integrityFlag: null },
     cost: { usd: 10, wastedUsd: 0, failedUsd: 4, supersededUsd: 1,
             coverage: { reported: 2, total: 3, silent: 1 }, rollupCheck: "matches" },
@@ -28,6 +29,7 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
     progress: { lastProgressAt: null, lastProgressChannel: null, lastSignalAt: null,
                 lastSignalChannel: null, silenceConclusive: true },
     awaitingYou: { count: 0, sinceMs: null, sourceKind: null },
+    stopCompliance: { requested: 0, lastRequestedAt: null, honored: null, violationEvidence: null },
     ...over,
   };
 }
@@ -37,8 +39,8 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     workflowRunId: "r1", workflowStepRunId: "sr1", goalId: "g1", stepTemplateId: "triage",
     name: "Triage", ordinal: 0, attempt: 1, kind: "step",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z",
-    elapsedMs: 30 * 60_000, workingMs: 60_000, parkedMs: 0, status: "passed", blockedReason: null,
-    restarts: 2, completions: 1, stallRescues: 0,
+    elapsedMs: 30 * 60_000, workingMs: 60_000, parkedMs: 0, reviewingMs: 0, turnMs: 0, status: "passed", blockedReason: null,
+    restarts: 2, completions: 1, stallRescues: 0, reviseAttempts: 0, reviseCapped: false,
     cost: { usd: 5, tokensIn: 1, tokensOut: 1, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" },
     tier: null, verifiers: null, refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [],
     outcomeStatus: "succeeded", failureCode: null, models: [], completionLog: [], ...over,
@@ -71,9 +73,46 @@ describe("everything on the dashboard is a count or a sum", () => {
     expect(a.relaunches).toBe(6);
   });
 
-  it("keeps the four duration terms addable", () => {
+  it("keeps the duration terms addable", () => {
     const a = aggregate(loaded());
-    expect(a.workingMs + a.parkedMs + a.unaccountedMs).toBe(a.elapsedMs);
+    expect(a.workingMs + a.agentMs + a.parkedMs + a.haltedMs + a.reviewingMs + a.unaccountedMs).toBe(a.elapsedMs);
+  });
+
+  it("names blocked, reviewing and between-model-calls time in the wall-clock share, and per step", () => {
+    // All three were inside "unaccounted" until the record was read for them: the
+    // run that blocked and sat until restarted, the orchestrator's turns, and the
+    // worker's turn beyond its model time.
+    const r = run({ durations: { elapsedMs: 10 * H, workingMs: H, agentMs: H, parkedMs: 5 * H, haltedMs: H, reviewingMs: H,
+                                 unaccountedMs: H, spanActiveMs: 0, accruing: false, integrityFlag: null } });
+    const a = aggregate({
+      runs: [r],
+      details: [{ run: r, spans: [span({ reviewingMs: 5 * 60_000, turnMs: 10 * 60_000 })], interventions: [], harnessErrors: [], toolDecisions: [] }],
+    });
+    expect(a.haltedMs).toBe(H);
+    expect(a.reviewingMs).toBe(H);
+    expect(a.agentMs).toBe(H);
+    expect(a.workingMs + a.agentMs + a.parkedMs + a.haltedMs + a.reviewingMs + a.unaccountedMs).toBe(a.elapsedMs);
+    const t = a.byStep.get("Triage")!;
+    expect(t.reviewingMs).toBe(5 * 60_000);
+    expect(t.agentMs).toBe(9 * 60_000);       // a 10m turn, 1m of it model time
+    expect(t.unaccountedMs).toBe(15 * 60_000);
+    expect(t.workingMs + t.agentMs + t.parkedMs + t.reviewingMs + t.unaccountedMs + t.unmeasuredMs).toBe(t.elapsedMs);
+    const { container } = render(<Dashboard agg={a} />);
+    expect(container.textContent).toContain("blocked, until restarted");
+    expect(container.textContent).toContain("reviewing");
+    expect(container.textContent).toContain("between model calls");
+  });
+
+  it("gives an unmeasured span's placed turn to the agent, and only the rest to 'not recorded'", () => {
+    const a = aggregate({
+      runs: [run()],
+      details: [{ run: run(), spans: [span({ name: "Verify", workingMs: null, elapsedMs: 100_000, parkedMs: 0, turnMs: 60_000 })],
+                  interventions: [], harnessErrors: [], toolDecisions: [] }],
+    });
+    const v = a.byStep.get("Verify")!;
+    expect(v.agentMs).toBe(60_000);
+    expect(v.unmeasuredMs).toBe(40_000);
+    expect(v.unaccountedMs).toBe(0);
   });
 
   it("takes parked time from the run's own split, never from summing pauses", () => {
@@ -658,7 +697,7 @@ describe("choosing the window to inspect", () => {
     expect(ids("1mo")).toEqual(["h1", "d1", "w1", "m1"]);
     // A run that ended INSIDE the window belongs to it even though it started before.
     const spans = run({ runId: "spans", startedAt: "2026-09-04T00:00:00.000Z",
-      durations: { elapsedMs: 36 * 3_600_000, workingMs: 0, parkedMs: 0, unaccountedMs: 36 * 3_600_000, spanActiveMs: 0, accruing: false, integrityFlag: null } });
+      durations: { elapsedMs: 36 * 3_600_000, workingMs: 0, parkedMs: 0, unaccountedMs: 36 * 3_600_000, agentMs: 0, haltedMs: 0, reviewingMs: 0, spanActiveMs: 0, accruing: false, integrityFlag: null } });
     expect(withinWindow([spans], "1h", NOW).map((r) => r.runId)).toEqual(["spans"]);
     // A run still running is active in every window, however long ago it began —
     // the stuck run IS stuck in every window.
@@ -737,6 +776,38 @@ describe("choosing the step the window is divided into", () => {
     expect(defaultIntervalFor("1mo")).toBe("1d");
   });
 
+  it("sums the window's share of each run, not its lifetime", async () => {
+    // Two runs that began three days before the window and ended inside it. Their
+    // lifetimes sum to 180h; the window holds 4h of them. The 8-hour page read
+    // "179h 53m wall clock" on the live data.
+    const NOW = Date.parse("2026-09-05T12:00:00.000Z");
+    vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+    const lifetime = (id: string) => run({
+      runId: id, terminationCause: "completed", startedAt: "2026-09-01T12:00:00.000Z", finishedAt: "2026-09-05T11:30:00.000Z",
+      durations: { elapsedMs: 90 * H, workingMs: H, parkedMs: 80 * H, unaccountedMs: 9 * H, agentMs: 0, haltedMs: 0, reviewingMs: 0, spanActiveMs: 0, accruing: false, integrityFlag: null },
+    });
+    const inWindow = (id: string) => ({
+      ...lifetime(id),
+      durations: { elapsedMs: 2 * H, workingMs: H / 2, parkedMs: H, unaccountedMs: H / 2, agentMs: 0, haltedMs: 0, reviewingMs: 0, spanActiveMs: 0, accruing: false, integrityFlag: null },
+    });
+    const summaries = vi.spyOn(api, "getRunSummaries").mockImplementation(async (_limit, from) =>
+      from === undefined ? [lifetime("a"), lifetime("b")] : [inWindow("a"), inWindow("b")]);
+    vi.spyOn(api, "getRunDetail").mockImplementation(async (id) =>
+      ({ run: lifetime(id), spans: [], interventions: [], harnessErrors: [], toolDecisions: [] }));
+    vi.spyOn(api, "getTemplateMetricsDetail").mockRejectedValue(new Error("none"));
+    render(<WorkflowRollup />);
+
+    fireEvent.click(await screen.findByText("Last 24 hours"));
+    fireEvent.click(screen.getByText("Last 8 hours"));
+    // The label says it is a sum: two runs alive side by side for 2h each read
+    // 4h, and "wall clock" alone promised a figure that could not exceed the window.
+    await waitFor(() => expect(screen.getByText("wall clock, summed across 2 runs").parentElement?.textContent).toContain("4h 0m"));
+    expect(summaries).toHaveBeenCalledWith(expect.anything(), new Date(NOW - 8 * H).toISOString());
+    expect(document.body.textContent).toContain("spent across 2 runs");
+    // The share is the window's too: 2h parked of 4h.
+    expect(screen.getAllByText("waiting on you")[0]!.parentElement?.textContent).toContain("50%");
+  });
+
   it("keeps the chosen step across a range change when it still fits, else falls back", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-09-05T12:00:00.000Z") });
     vi.spyOn(api, "getRunSummaries").mockResolvedValue([run({ startedAt: "2026-09-05T11:00:00.000Z" })]);
@@ -791,20 +862,26 @@ describe("when the harness failed", () => {
     const headings = [...container.querySelectorAll("h2")].map((h) => h.textContent);
     expect(headings.indexOf("Harness")).toBe(0);
     expect(headings.indexOf("Harness")).toBeLessThan(headings.indexOf("What happened"));
-    // One panel per kind, each carrying its own total.
+    // One chart, one legend row per kind — every kind named whether or not it fired.
+    expect(container.textContent).toContain("Errors");
     expect(container.textContent).toContain("Worker crashes");
     expect(container.textContent).toContain("Failures inside the harness");
     expect(container.textContent).toContain("Runs stopped by the harness");
-    const counted = [...container.querySelectorAll("[data-bar]")].map((r) => Number(r.getAttribute("data-count")));
-    expect(counted.reduce((x, n) => x + n, 0)).toBe(2);
+    const bars = [...container.querySelectorAll("[data-bar]")];
+    expect(bars.reduce((x, r) => x + Number(r.getAttribute("data-count")), 0)).toBe(2);
+    // The two events are on the one chart, each in its own series.
+    const fired = bars.filter((r) => Number(r.getAttribute("data-count")) > 0).map((r) => r.getAttribute("data-series"));
+    expect(fired.sort()).toEqual(["crash_relaunch", "run_killed"]);
   });
 
-  it("says a kind's window is empty rather than drawing an empty axis", () => {
+  it("says the window is empty rather than drawing an empty axis", () => {
     const from = Date.parse("2026-09-01T00:00:00.000Z");
     const a = aggregate({ runs: [run({ terminationCause: "completed" })], details: [], window: { fromMs: from, toMs: from + 24 * 3_600_000 }, intervalMs: 3_600_000 });
     const { container } = render(<Dashboard agg={a} />);
-    expect((container.textContent?.match(/Nothing recorded in this window/g) ?? []).length).toBe(3);
+    expect((container.textContent?.match(/Nothing recorded in this window/g) ?? []).length).toBe(1);
     expect(container.querySelectorAll("[data-bar]")).toHaveLength(0);
+    // And the sentence stands alone — a legend of three zeros would only repeat it.
+    expect(container.textContent).not.toContain("Worker crashes");
   });
 });
 
@@ -813,6 +890,9 @@ describe("occurrences per interval", () => {
   // ledger, so the fixtures are built in local time too.
   const midnight = new Date(2026, 8, 1, 0, 0, 0).getTime();
   const H = 3_600_000;
+
+  const series = (key: string, buckets: TimeBucket[], unit: { one: string; many: string }) =>
+    ({ key, label: key, tone: "var(--err)", unit, buckets });
 
   it("counts events into whole-clock buckets and keeps the zeros", () => {
     const b = bucketize([midnight + 30 * 60_000, midnight + 45 * 60_000, midnight + 5 * H], midnight, midnight + 6 * H, H);
@@ -834,7 +914,7 @@ describe("occurrences per interval", () => {
 
   it("draws one bar per bucket with the count in its hover text, and whole-number gridlines", () => {
     const b = bucketize([midnight + 60_000, midnight + 120_000, midnight + 2 * H], midnight, midnight + 4 * H, H);
-    const { container } = render(<TimeBars buckets={b} fromMs={midnight} toMs={midnight + 4 * H} unit={{ one: "failure", many: "failures" }} />);
+    const { container } = render(<TimeBars series={[series("infra_failure", b, { one: "failure", many: "failures" })]} fromMs={midnight} toMs={midnight + 4 * H} />);
     const bars = [...container.querySelectorAll("[data-bar]")];
     expect(bars).toHaveLength(4);
     expect(bars[0]!.querySelector("title")?.textContent).toBe("Sep 01 00:00 → Sep 01 01:00: 2 failures");
@@ -847,9 +927,9 @@ describe("occurrences per interval", () => {
   it("labels whole days when the labelled ticks are a day apart", () => {
     const start = new Date(2026, 7, 29, 17, 22).getTime();
     const b = bucketize([start + H], start, start + 7 * 24 * H, 8 * H);
-    const { container } = render(<TimeBars buckets={b} fromMs={start} toMs={start + 7 * 24 * H} unit={{ one: "x", many: "x" }} />);
+    const { container } = render(<TimeBars series={[series("run_killed", b, { one: "x", many: "x" })]} fromMs={start} toMs={start + 7 * 24 * H} />);
     const labels = [...container.querySelectorAll("text.mono")].map((t) => t.textContent).filter((t) => /[A-Z]/.test(t ?? ""));
-    // A third-width panel: four labels at most, so none collide.
+    // A half-width panel: four labels at most, so none collide.
     expect(labels.length).toBeLessThanOrEqual(4);
     expect(labels[0]).toBe("Aug 30 00:00");
     expect(new Set(labels).size).toBe(labels.length);

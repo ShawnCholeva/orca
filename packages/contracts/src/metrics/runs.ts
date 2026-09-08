@@ -88,18 +88,45 @@ export const Intervention = z.object({
 export type Intervention = z.infer<typeof Intervention>;
 
 /**
- * The four durations that must sum: `elapsedMs = workingMs + parkedMs + unaccountedMs`.
+ * The durations that must sum:
+ * `elapsedMs = workingMs + agentMs + parkedMs + haltedMs + reviewingMs + unaccountedMs`.
  * `spanActiveMs` is reported alongside but deliberately OUTSIDE the sum — parks can
  * occur inside a span, so it overlaps the others.
+ *
+ * The placed terms are disjoint by precedence — parked, then halted, then reviewing,
+ * then the worker's turns — so a moment lands in exactly one of them. `workingMs` is
+ * a magnitude inside the worker's turns; `agentMs` is the rest of those turns.
  */
 export const RunDurations = z.object({
   /** First span start → the run's terminal moment; accrues to now only while the RUN is live. */
   elapsedMs: z.number().int().nonnegative(),
   /** Σ telemetry.latency_ms — provider-reported model time. A magnitude, not a placed interval. */
   workingMs: z.number().int().nonnegative(),
+  /**
+   * The worker's turns (`workflow.worker.prompted` → `workflow.worker.responded`,
+   * outside the terms above) less `workingMs`: tools, hooks and the agent's own
+   * client between model calls. Zero on a run recorded before turn brackets existed.
+   */
+  agentMs: z.number().int().nonnegative(),
   /** Union of MERGED park intervals, clamped to the run's window. Never a sum. */
   parkedMs: z.number().int().nonnegative(),
-  /** Residual: dispatch, hooks, sensors, orchestrator turns, and unobserved interior. */
+  /**
+   * The run stood still with no card open: `workflow.run.blocked` or
+   * `workflow.run.paused` → the `workflow.run.started` that resumed it, outside
+   * parks. On the live data one run spent 16 of its 90 hours this way, and every
+   * one of them read as unaccounted. A run the operator stopped is the same
+   * standstill and counts here too; whose decision it was lives in
+   * `terminationCause` and `stopCompliance`, not in this magnitude.
+   */
+  haltedMs: z.number().int().nonnegative(),
+  /**
+   * The orchestrator's turns — judging a step's output, checking it independently,
+   * deciding what happens next, answering the user — from the phase brackets and the
+   * mediator's `workflow.orchestrator.turn_*` events, outside parks and halts. A turn
+   * the daemon lost to a restart counts until the turn that replaced it began.
+   */
+  reviewingMs: z.number().int().nonnegative(),
+  /** Residual: dispatch and startup gaps, the idle wait before a prompt lands, and unobserved interior. */
   unaccountedMs: z.number().int().nonnegative(),
   /** Σ span durations. Overlaps the above; excluded from the sum. */
   spanActiveMs: z.number().int().nonnegative(),
@@ -260,6 +287,10 @@ export const RunTraceSpan = z.object({
    * between spans overlaps none, so it lands in neither, exactly as intended.
    */
   parkedMs: z.number().int().nonnegative().nullable(),
+  /** The orchestrator's turns inside this span's window, outside its parks. Null with `elapsedMs`. */
+  reviewingMs: z.number().int().nonnegative().nullable(),
+  /** The worker's turns inside this span's window, outside parks and orchestrator turns. Null with `elapsedMs`. */
+  turnMs: z.number().int().nonnegative().nullable(),
 
   status: z.string(),
   blockedReason: z.string().nullable(),
@@ -268,6 +299,25 @@ export const RunTraceSpan = z.object({
   /** step_complete count. >1 means the revise loop ran — distinct from `restarts`. */
   completions: z.number().int().nonnegative(),
   stallRescues: z.number().int().nonnegative(),
+  /**
+   * Revisions asked of this step — the orchestrator sending the work back rather
+   * than accepting it. Distinct from `restarts` (the worker died and was
+   * relaunched) and from `completions` (how many times it claimed done): a step
+   * can be revised without ever completing again, which is exactly the case the
+   * cap catches, and it left no trace on either of the other two.
+   */
+  reviseAttempts: z.number().int().nonnegative(),
+  /**
+   * The revise budget ran out and the step was escalated to a human. The single
+   * strongest available signal that a step's instructions or its verification are
+   * miscalibrated — and it produces NO completion, so nothing else on this span
+   * records it.
+   *
+   * Read from `workflow.step.revise_capped`. False on runs that predate that
+   * event; `reviseAttempts` comes from the step run's own column and is complete
+   * for all of them, so the magnitude is never lost even where the flag is.
+   */
+  reviseCapped: z.boolean(),
 
   cost: SpanCost.nullable(),
   /**
@@ -364,6 +414,39 @@ export const AwaitingYou = z.object({
 }).strict();
 export type AwaitingYou = z.infer<typeof AwaitingYou>;
 
+/**
+ * Did the harness do what the operator told it?
+ *
+ * There was no way to ask this. Nothing recorded that a stop had been requested,
+ * so a stop that was ignored looked exactly like a stop that was never asked for
+ * — and one was: a run kept working after "stop", restarted itself three times,
+ * and blocked. For a system steering toward Levels 4 and 5, operator-stop
+ * compliance is not a nice-to-have measure; it is the one an operator has to be
+ * able to check before handing over more autonomy.
+ *
+ * `honored` is null when no stop was ever asked for, which is the common case and
+ * is NOT the same as "complied". A false is a defect with evidence attached.
+ */
+export const StopCompliance = z.object({
+  /** How many times the operator asked this run to stop. */
+  requested: z.number().int().nonnegative(),
+  lastRequestedAt: z.string().nullable(),
+  /**
+   * False when work STARTED after the last stop request and before any resume.
+   * A resume closes the window: the operator asked for the work to continue, so
+   * what happens after it is not a violation.
+   *
+   * Null when nothing was ever requested — the question does not apply. Never
+   * default this to true: "no stop was asked for" and "the stop was obeyed" are
+   * different facts, and collapsing them would let a surface report perfect
+   * compliance for a system that had never been tested on it.
+   */
+  honored: z.boolean().nullable(),
+  /** The event type that started work inside the window, when one did. */
+  violationEvidence: z.string().nullable(),
+}).strict();
+export type StopCompliance = z.infer<typeof StopCompliance>;
+
 export const RunSummary = z.object({
   runId: z.string(),
   goalId: z.string(),
@@ -410,6 +493,7 @@ export const RunSummary = z.object({
    */
   retriedAttempts: z.number().int().nonnegative(),
   openInterventions: z.number().int().nonnegative(),
+  stopCompliance: StopCompliance,
   awaitingYou: AwaitingYou,
 }).strict();
 export type RunSummary = z.infer<typeof RunSummary>;

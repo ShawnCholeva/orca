@@ -45,7 +45,14 @@ const usd = (v: number) => `$${v.toFixed(2)}`;
 
 const TONE = {
   working: "var(--run)",
+  // The worker's turn beyond inference — tools, hooks, its client. Same owner as
+  // `working`, one hue over.
+  agent: "var(--run-2)",
   waiting: "var(--accent-2)",
+  // The orchestrator's own turns: Orca's time but not the worker's, so a third hue.
+  reviewing: "var(--info)",
+  // A run blocked and standing still until restarted — nobody's time, so no hue.
+  halted: "var(--text-3)",
   unseen: "var(--text-4)",
   // Orca stopping a run is not the workflow failing — the Runs list renders that
   // cause neutral for exactly that reason, and red here would contradict it. `stopped`
@@ -104,7 +111,7 @@ interface StepAgg {
   // in 2 of 2 attempts, so that is not a hypothetical — it is two rows that would have
   // read 100% idle. Parked survives in those spans (it is built from intervals, not
   // from completions), so only the remainder is unknown.
-  workingMs: number; parkedMs: number; unaccountedMs: number; unmeasuredMs: number;
+  workingMs: number; agentMs: number; parkedMs: number; reviewingMs: number; unaccountedMs: number; unmeasuredMs: number;
   unmeasuredSpans: number;
 
   // Which checks fired, counted over spans that COMPLETED — a span with no completion
@@ -279,7 +286,7 @@ export function aggregate({
   for (const s of spans) {
     const e = byStep.get(s.name) ?? {
       usd: 0, elapsedMs: 0, restarts: 0, spans: 0, runIds: new Set<string>(),
-      workingMs: 0, parkedMs: 0, unaccountedMs: 0, unmeasuredMs: 0, unmeasuredSpans: 0,
+      workingMs: 0, agentMs: 0, parkedMs: 0, reviewingMs: 0, unaccountedMs: 0, unmeasuredMs: 0, unmeasuredSpans: 0,
       completed: 0, execChecks: 0, groundChecks: 0, reviewChecks: 0,
       gateSpans: 0, gatesUnrecorded: 0, lastGateAt: null,
     };
@@ -292,17 +299,27 @@ export function aggregate({
     const elapsed = s.elapsedMs ?? 0;
     const parked = Math.min(s.parkedMs ?? 0, elapsed);
     e.parkedMs += parked;
+    // Placed and already disjoint from parked at the daemon; clamped here in the same
+    // precedence so the step's terms stay addable whatever the span reports.
+    const reviewing = Math.min(s.reviewingMs ?? 0, Math.max(0, elapsed - parked));
+    e.reviewingMs += reviewing;
+    const turn = Math.min(s.turnMs ?? 0, Math.max(0, elapsed - parked - reviewing));
     if (s.workingMs === null) {
+      // The turn is placed even when its model time was never written down: the
+      // whole of it is the agent's, and only what lies outside it is unrecorded.
       e.unmeasuredSpans += 1;
-      e.unmeasuredMs += Math.max(0, elapsed - parked);
+      e.agentMs += turn;
+      e.unmeasuredMs += Math.max(0, elapsed - parked - reviewing - turn);
     } else {
-      const working = Math.min(s.workingMs, Math.max(0, elapsed - parked));
+      const working = Math.min(s.workingMs, Math.max(0, elapsed - parked - reviewing));
       e.workingMs += working;
+      const agent = Math.min(Math.max(0, turn - working), Math.max(0, elapsed - parked - reviewing - working));
+      e.agentMs += agent;
       // Clamped, because two live spans already report working + parked ABOVE their
       // own elapsed. A negative remainder would render as a bar segment growing
       // backwards; the terms are held addable instead, which is the property the
       // whole duration vocabulary rests on.
-      e.unaccountedMs += Math.max(0, elapsed - parked - working);
+      e.unaccountedMs += Math.max(0, elapsed - parked - reviewing - working - agent);
     }
     if (s.kind === "gate") {
       e.gateSpans += 1;
@@ -328,11 +345,14 @@ export function aggregate({
     supersededUsd: sum((r) => r.cost.supersededUsd),
     elapsedMs: sum((r) => r.durations.elapsedMs),
     workingMs: sum((r) => r.durations.workingMs),
+    agentMs: sum((r) => r.durations.agentMs),
     // Parked time comes from each RUN's own decomposition, never from summing
     // intervention durations. Parks overlap and an open one grows without bound, so
     // that sum reaches 424h against 100h of wall clock — two ways of counting the
     // same thing, only one of which can be added to the terms beside it.
     parkedMs: sum((r) => r.durations.parkedMs),
+    haltedMs: sum((r) => r.durations.haltedMs),
+    reviewingMs: sum((r) => r.durations.reviewingMs),
     unaccountedMs: sum((r) => r.durations.unaccountedMs),
     delivered: sum((r) => r.stepsDelivered),
     blocked: sum((r) => r.stepsBlocked),
@@ -423,6 +443,8 @@ function stepClock(agg: Agg): StackedRow[] {
         : dur(v.elapsedMs),
       parts: [
         { label: "active work", value: v.workingMs, display: dur(v.workingMs), tone: TONE.working },
+        { label: "between model calls", value: v.agentMs, display: dur(v.agentMs), tone: TONE.agent },
+        { label: "reviewing", value: v.reviewingMs, display: dur(v.reviewingMs), tone: TONE.reviewing },
         { label: "waiting on you", value: v.parkedMs, display: dur(v.parkedMs), tone: TONE.waiting },
         { label: "unaccounted", value: v.unaccountedMs, display: dur(v.unaccountedMs), tone: TONE.unseen },
         { label: "not recorded", value: v.unmeasuredMs, display: dur(v.unmeasuredMs), tone: TONE.unrecorded },
@@ -532,7 +554,10 @@ export function Dashboard({ agg }: { agg: Agg }) {
             ? `spent across ${agg.ended.length} runs that ended · ${live} still running, not counted`
             : `spent across ${agg.ended.length} runs`}
         />
-        <Big value={dur(agg.elapsedMs)} label="wall clock" />
+        {/* A sum of run-hours, and the label says so. Two runs alive side by side for
+            20h each read 41h in a 24-hour window, and "wall clock" alone promised a
+            figure that could not exceed the window. */}
+        <Big value={dur(agg.elapsedMs)} label={`wall clock, summed across ${agg.ended.length} runs`} />
         <Big value={dur(agg.workingMs)} label="active work" tone={TONE.working} />
         <Big value={`${parkedShare}%`} label="waiting on you" tone={TONE.waiting} />
       </div>
@@ -548,7 +573,7 @@ export function Dashboard({ agg }: { agg: Agg }) {
           const now = Date.now();
           const live = (agg.sessions ?? []).filter((s) => s.endedAt === null).length;
           return (
-            <Panel title="Active sessions" span={12}
+            <Panel title="Active sessions" span={6}
                    right={agg.sessions !== null && (
                      <span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)" }}>
                        {live} running now
@@ -580,32 +605,35 @@ export function Dashboard({ agg }: { agg: Agg }) {
           );
         })()}
 
-        {/* WHEN the harness failed, one panel per kind, each a count per interval
-            across the chosen window. Three kinds: a worker crashing and being
-            relaunched, a completion failing with a code that names the substrate,
-            and the run being killed. A workflow veto is not here — that is the
-            workflow deciding. Split by kind rather than stacked, because the three
-            are different events with different remedies and a stack would invite
-            adding them. */}
-        {agg.window !== null && ([
-          { kind: "crash_relaunch", title: "Worker crashes", unit: { one: "relaunch after a crash", many: "relaunches after a crash" } },
-          { kind: "infra_failure", title: "Failures inside the harness", unit: { one: "failure", many: "failures" } },
-          { kind: "run_killed", title: "Runs stopped by the harness", unit: { one: "run stopped", many: "runs stopped" } },
-        ] as const).map(({ kind, title, unit }) => {
-          const times = agg.harnessErrors.filter((e) => e.kind === kind).map((e) => Date.parse(e.at));
-          const window = agg.window!;
+        {/* WHEN the harness failed — one chart, a count per interval across the chosen
+            window, one hue per kind. Three kinds: a worker crashing and being
+            relaunched, a completion failing with a code that names the substrate, and
+            the run being killed. A workflow veto is not here — that is the workflow
+            deciding. Grouped rather than stacked: the three are different events with
+            different remedies, and a stack would invite adding them. The hues run
+            from the kind the harness recovered from to the one that ended a run;
+            they are the theme's status colours, not the duration hues above, because
+            nothing here is anybody's time. */}
+        {agg.window !== null && (() => {
+          const window = agg.window;
+          const series = ([
+            { key: "crash_relaunch", label: "Worker crashes", tone: "var(--info)", unit: { one: "relaunch after a crash", many: "relaunches after a crash" } },
+            { key: "infra_failure", label: "Failures inside the harness", tone: "var(--warn)", unit: { one: "failure", many: "failures" } },
+            { key: "run_killed", label: "Runs stopped by the harness", tone: "var(--err)", unit: { one: "run stopped", many: "runs stopped" } },
+          ] as const).map((s) => ({
+            ...s,
+            buckets: bucketize(
+              agg.harnessErrors.filter((e) => e.kind === s.key).map((e) => Date.parse(e.at)),
+              window.fromMs, window.toMs, agg.intervalMs,
+            ),
+          }));
           return (
-            <Panel key={kind} title={title} span={4}
-                   right={<span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)" }}>{times.length}</span>}>
-              <TimeBars
-                buckets={bucketize(times, window.fromMs, window.toMs, agg.intervalMs)}
-                fromMs={window.fromMs}
-                toMs={window.toMs}
-                unit={unit}
-              />
+            <Panel title="Errors" span={6}
+                   right={<span className="mono" style={{ fontSize: "var(--fs-2)", color: "var(--text)" }}>{agg.harnessErrors.length}</span>}>
+              <TimeBars series={series} fromMs={window.fromMs} toMs={window.toMs} />
             </Panel>
           );
-        })}
+        })()}
 
         <SectionHeading>What happened</SectionHeading>
 
@@ -803,14 +831,22 @@ export function Dashboard({ agg }: { agg: Agg }) {
               stays true whatever the total is.
 
               Rows keep their semantic order rather than sorting by size, because these
-              three are a fixed vocabulary the reader learns once — re-ordering them
+              five are a fixed vocabulary the reader learns once — re-ordering them
               per window would cost more than the ranking buys. They still sum to the
-              whole, which is the property worth being able to check by adding. */}
+              whole, which is the property worth being able to check by adding.
+
+              Blocked and reviewing were inside "unaccounted" until the record was
+              read for them: a run that blocked and sat until restarted, and the
+              orchestrator's judge and check turns, are both written down, and the
+              hatched bar was claiming nobody knew. */}
           <BarList
             scaleTo={agg.elapsedMs}
             items={[
               { label: "active work", value: agg.workingMs, display: share(agg.workingMs, agg.elapsedMs), tone: TONE.working },
+              { label: "between model calls", value: agg.agentMs, display: share(agg.agentMs, agg.elapsedMs), tone: TONE.agent },
+              { label: "reviewing", value: agg.reviewingMs, display: share(agg.reviewingMs, agg.elapsedMs), tone: TONE.reviewing },
               { label: "waiting on you", value: agg.parkedMs, display: share(agg.parkedMs, agg.elapsedMs), tone: TONE.waiting },
+              { label: "blocked, until restarted", value: agg.haltedMs, display: share(agg.haltedMs, agg.elapsedMs), tone: TONE.halted },
               { label: "unaccounted", value: agg.unaccountedMs, display: share(agg.unaccountedMs, agg.elapsedMs), tone: TONE.unseen },
             ]}
           />
@@ -821,13 +857,16 @@ export function Dashboard({ agg }: { agg: Agg }) {
               is what happened inside Clarify, and `Time by step` two panels along
               already ranks them against each other.
 
-              Four terms, not three. A step whose attempts never completed reports no
-              working time at all, and calling that "unaccounted" would state that Orca
-              sat idle — Verify and Critique are unmeasured in every attempt, so those
-              two rows would have read 100% idle rather than 100% unrecorded. */}
+              Five terms. A step whose attempts never completed reports no working
+              time at all, and calling that "unaccounted" would state that Orca sat
+              idle — Verify and Critique are unmeasured in every attempt, so those two
+              rows would have read 100% idle rather than 100% unrecorded. Blocked is
+              absent here on purpose: a run halts BETWEEN steps, so no step holds it. */}
           <StackedRows
             legend={[
               { label: "active work", value: 0, display: "", tone: TONE.working },
+              { label: "between model calls", value: 0, display: "", tone: TONE.agent },
+              { label: "reviewing", value: 0, display: "", tone: TONE.reviewing },
               { label: "waiting on you", value: 0, display: "", tone: TONE.waiting },
               { label: "unaccounted", value: 0, display: "", tone: TONE.unseen },
               { label: "not recorded", value: 0, display: "", tone: TONE.unrecorded },
@@ -1125,6 +1164,11 @@ export function WorkflowRollup() {
   const [interval, setInterval] = useState<string | null>(null);
   const [gates, setGates] = useState<TemplateMetricsDetail | null>(null);
   const [sessions, setSessions] = useState<SessionInterval[] | null>(null);
+  // Each run's durations over the WINDOW, by run id. The lifetime fetch below
+  // selects the runs and counts them per range; the sums come from here. Summing
+  // lifetimes read "179h 53m wall clock" on an 8-hour page: two runs that began
+  // three days earlier and ended inside the window.
+  const [inWindow, setInWindow] = useState<Map<string, RunSummary["durations"]> | null>(null);
 
   // Session intervals for the window, refetched when the window changes. Global —
   // not keyed to the workflow — so this is the one fetch the choosers don't touch.
@@ -1136,6 +1180,15 @@ export function WorkflowRollup() {
     getSessionIntervals(new Date(to.getTime() - rangeMs).toISOString(), to.toISOString())
       .then((s) => { if (live) setSessions(s); })
       .catch(() => { if (live) setSessions(null); });
+    return () => { live = false; };
+  }, [rangeMs]);
+
+  useEffect(() => {
+    let live = true;
+    setInWindow(null);
+    getRunSummaries(50, new Date(Date.now() - rangeMs).toISOString())
+      .then((rs) => { if (live) setInWindow(new Map(rs.map((r) => [r.runId, r.durations]))); })
+      .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, [rangeMs]);
 
@@ -1209,7 +1262,8 @@ export function WorkflowRollup() {
     </div>
   );
 
-  const runs = chosenVersion === ALL_VERSIONS ? workflowRuns : workflowRuns.filter((r) => String(r.templateVersion) === chosenVersion);
+  const runs = (chosenVersion === ALL_VERSIONS ? workflowRuns : workflowRuns.filter((r) => String(r.templateVersion) === chosenVersion))
+    .map((r) => ({ ...r, durations: inWindow?.get(r.runId) ?? r.durations }));
   const runIds = new Set(runs.map((r) => r.runId));
   const details = loaded.details.filter((d) => runIds.has(d.run.runId));
   const versionChoices: WorkflowChoice[] = [
@@ -1233,6 +1287,10 @@ export function WorkflowRollup() {
         <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>
           No {chosen.name}{chosenVersion === ALL_VERSIONS ? "" : ` v${chosenVersion}`} runs were active in the {windowWords}.
         </p>
+      ) : inWindow === null ? (
+        // The choosers stay; only the figures wait. Lifetimes would fill the gap,
+        // and be wrong for exactly the window change that prompted the wait.
+        <p style={{ fontSize: "var(--fs-3)", color: "var(--text-3)" }}>Loading…</p>
       ) : (
         <Dashboard agg={aggregate({
           runs, details, gates, gatesCoverEveryVersion, gatesPeriod,

@@ -1,11 +1,11 @@
 import type {
   Intervention, InterventionSourceKind, ParkState, ProgressChannel as RunProgressChannel,
-  HarnessError, RunCost, RunDetail, RunDurations, RunSummary, RunTraceSpan, SpanCost, ToolDecision, VerificationTier,
+  HarnessError, RunCost, RunDetail, RunDurations, RunSummary, RunTraceSpan, SpanCost, StopCompliance, ToolDecision, VerificationTier,
 } from "@orca/contracts";
 import { classifyTier } from "./verification.js";
 import { sourcesPassed } from "./source-signals.js";
 import { INFRA_REASON_MARKERS } from "./infra-failure.js";
-import type { ActivityEvent, RunEvent, RunRow, RunStepRunRow, RunTransition } from "./runs-fetch.js";
+import type { ActivityEvent, RunEvent, RunRow, RunStepRunRow, RunTransition, StepPhaseEvent } from "./runs-fetch.js";
 
 // The run-trace projection. Pure functions over already-fetched rows; see
 // docs/superpowers/specs/2026-09-02-run-trace-contract.md for the evidence contract.
@@ -60,6 +60,140 @@ export function clampIntervals(intervals: Interval[], lo: number, hi: number): I
   return intervals
     .map((i) => ({ start: Math.max(i.start, lo), end: Math.min(i.end, hi) }))
     .filter((i) => i.end > i.start);
+}
+
+/**
+ * `a` minus the union of `b`: the parts of `a` that no interval of `b` covers. This
+ * is what keeps the placed duration terms disjoint — each later term is computed
+ * against the ones before it, so a moment lands in exactly one.
+ */
+export function subtractIntervals(a: Interval[], b: Interval[]): Interval[] {
+  const holes = mergeIntervals(b);
+  const out: Interval[] = [];
+  for (const i of mergeIntervals(a)) {
+    let cur = i.start;
+    for (const h of holes) {
+      if (h.end <= cur) continue;
+      if (h.start >= i.end) break;
+      if (h.start > cur) out.push({ start: cur, end: h.start });
+      cur = Math.max(cur, h.end);
+    }
+    if (cur < i.end) out.push({ start: cur, end: i.end });
+  }
+  return out;
+}
+
+/**
+ * When the run stood still: from `workflow.run.blocked` to the `workflow.run.started`
+ * that resumed it. Nothing was parked and nothing was running — the reader had to
+ * restart it. A block never resumed runs to the run's terminal moment, which for a
+ * run that is still blocked is the block itself, so it contributes nothing and the
+ * age of its abandoned cards stays off the clock (§2.1).
+ */
+/**
+ * Time the run stood still with no card open.
+ *
+ * `paused` opens a halt alongside `blocked` because the two are the same
+ * standstill measured the same way — the run is not working and no park explains
+ * it — and they resume through the same `workflow.run.started`. They differ only
+ * in whose decision it was, which `terminationCause` and the stop-compliance
+ * record already carry. Without `paused` here, every minute a run spends stopped
+ * at the operator's request lands in `unaccountedMs`, which is the bucket that
+ * exists for time we cannot explain — and this time we can.
+ */
+export function haltedIntervals(runEvents: RunEvent[], runId: string, endMs: number): Interval[] {
+  const out: Interval[] = [];
+  let since: number | null = null;
+  for (const e of runEvents) {
+    if (e.workflowRunId !== runId) continue;
+    const at = ms(e.createdAt);
+    if (at === null) continue;
+    if (e.type === "workflow.run.blocked" || e.type === "workflow.run.paused") {
+      if (since === null) since = at;
+    } else if (e.type === "workflow.run.started" && since !== null) {
+      out.push({ start: since, end: at });
+      since = null;
+    }
+  }
+  if (since !== null) out.push({ start: since, end: endMs });
+  return mergeIntervals(out);
+}
+
+/**
+ * Brackets keyed by step run: `opens` starts one, `closes` ends it, and a second
+ * open before a close ends the first at the new start — a turn the daemon lost to a
+ * restart still occupied the run until the next one began. Anything still open at
+ * the end is clipped to its step run's own bracket, which is the most an unclosed
+ * record can honestly claim, and to the run's terminal moment.
+ */
+function bracketIntervals(
+  events: Array<{ createdAt: string; stepRunId: string | null; opens: boolean; closes: boolean }>,
+  stepRuns: RunStepRunRow[],
+  endMs: number
+): Interval[] {
+  const bracket = new Map(stepRuns.map((s) => [s.stepRunId, { start: ms(s.startedAt), end: ms(s.finishedAt) }]));
+  const open = new Map<string, number>();
+  const out: Interval[] = [];
+  const close = (stepRunId: string, at: number) => {
+    const start = open.get(stepRunId);
+    if (start === undefined) return;
+    open.delete(stepRunId);
+    const b = bracket.get(stepRunId);
+    out.push({ start: Math.max(start, b?.start ?? start), end: Math.min(at, b?.end ?? endMs) });
+  };
+  for (const e of events) {
+    if (e.stepRunId === null) continue;
+    const at = ms(e.createdAt);
+    if (at === null) continue;
+    close(e.stepRunId, at);
+    if (e.opens) open.set(e.stepRunId, at);
+  }
+  for (const id of [...open.keys()]) close(id, endMs);
+  return mergeIntervals(out);
+}
+
+/**
+ * The orchestrator's own turns. Two records, unioned: the judge and independent-check
+ * phases (`workflow.step.phase_changed`, live-only state that boot reconciliation
+ * clears WITHOUT an event), and the mediator's turn brackets
+ * (`workflow.orchestrator.turn_*`), which also cover the next-decision and user-message
+ * turns the phases never named. On the live run one decision turn was lost to four
+ * daemon restarts and re-issued seven minutes later; that gap is the orchestrator's
+ * and is counted as such, not as nobody's.
+ */
+export function reviewingIntervals(
+  phaseEvents: StepPhaseEvent[],
+  stepRuns: RunStepRunRow[],
+  runId: string,
+  endMs: number,
+  runEvents: RunEvent[] = []
+): Interval[] {
+  const phases = bracketIntervals(
+    phaseEvents.filter((e) => e.workflowRunId === runId).map((e) => ({ createdAt: e.createdAt, stepRunId: e.stepRunId, opens: e.phase !== null, closes: true })),
+    stepRuns, endMs
+  );
+  const turns = bracketIntervals(
+    runEvents
+      .filter((e) => e.workflowRunId === runId && (e.type === "workflow.orchestrator.turn_started" || e.type === "workflow.orchestrator.turn_finished"))
+      .map((e) => ({ createdAt: e.createdAt, stepRunId: e.stepRunId, opens: e.type === "workflow.orchestrator.turn_started", closes: true })),
+    stepRuns, endMs
+  );
+  return mergeIntervals([...phases, ...turns]);
+}
+
+/**
+ * The workers' turns: from a prompt landing in the composer (`workflow.worker.prompted`)
+ * to the Stop hook (`workflow.worker.responded`). Model inference is a magnitude
+ * inside these; the rest of a turn is tools, hooks and the agent's own client, which
+ * this places without claiming to itemise.
+ */
+export function workerTurnIntervals(runEvents: RunEvent[], stepRuns: RunStepRunRow[], runId: string, endMs: number): Interval[] {
+  return bracketIntervals(
+    runEvents
+      .filter((e) => e.workflowRunId === runId && (e.type === "workflow.worker.prompted" || e.type === "workflow.worker.responded"))
+      .map((e) => ({ createdAt: e.createdAt, stepRunId: e.stepRunId, opens: e.type === "workflow.worker.prompted", closes: true })),
+    stepRuns, endMs
+  );
 }
 
 /**
@@ -276,41 +410,87 @@ export function computeDurations(input: {
   transitions: RunTransition[];
   interventions: Intervention[];
   nowMs: number;
+  /** When set, every term covers only the part of the run at or after this moment. */
+  fromMs?: number;
+  /** `workflow.run.blocked` / `workflow.run.started` for the halted term. */
+  runEvents?: RunEvent[];
+  /** `workflow.step.phase_changed` for the reviewing term. */
+  phaseEvents?: StepPhaseEvent[];
 }): RunDurations {
-  const { run, stepRuns, transitions, interventions, nowMs } = input;
+  const { run, stepRuns, transitions, interventions, nowMs, fromMs } = input;
+  const runEvents = input.runEvents ?? [];
+  const phaseEvents = input.phaseEvents ?? [];
   const startMs = ms(run.startedAt) ?? nowMs;
   const endMs = Math.max(startMs, runTerminalMs(run, stepRuns, nowMs));
-  const elapsedMs = endMs - startMs;
+  // The span the terms are measured over: the run, or the part of it inside the
+  // reader's window. The Workflows page summed LIFETIMES over the runs active in
+  // its window and read 179h of wall clock on an 8-hour page — two runs that
+  // began three days earlier and ended inside it. A window that opened after the
+  // run ended holds none of it.
+  const lo = fromMs === undefined ? startMs : Math.max(startMs, fromMs);
+  const hi = Math.max(lo, endMs);
+  const elapsedMs = hi - lo;
 
-  const workingMs = transitions
-    .filter((t) => t.transition.boundary === "step_complete")
-    .reduce((acc, t) => acc + (t.transition.telemetry?.latency_ms ?? 0), 0);
+  const completions = transitions.filter((t) => t.transition.boundary === "step_complete");
+  const workingMs = fromMs === undefined
+    ? completions.reduce((acc, t) => acc + (t.transition.telemetry?.latency_ms ?? 0), 0)
+    // Working time is a magnitude, not a placed interval, so a window cannot cut it
+    // exactly. Its one bound: the model time ended when the step completed. Placed
+    // there, only the part after the window opened counts — counting all of it
+    // would put more work inside the window than the window has wall clock.
+    : totalMs(clampIntervals(completions.map((t) => {
+        const end = ms(t.transition.createdAt) ?? hi;
+        return { start: end - (t.transition.telemetry?.latency_ms ?? 0), end };
+      }), lo, hi));
 
-  // Merged union, clamped to the run's own window — a park that outlives the run
+  // Merged union, clamped to the measured span — a park that outlives the run
   // contributes only the part that overlapped it.
-  const parkedMs = totalMs(
-    clampIntervals(mergeIntervals(parkIntervals(interventions, nowMs)), startMs, endMs)
+  const parked = clampIntervals(mergeIntervals(parkIntervals(interventions, nowMs)), lo, hi);
+  const parkedMs = totalMs(parked);
+
+  // Each placed term yields to the ones before it, so the set stays disjoint and
+  // addable: a park is the reader's time whatever else was going on, a halt is the
+  // run's, and the orchestrator's turns are whatever of theirs is left.
+  const halted = subtractIntervals(clampIntervals(haltedIntervals(runEvents, run.runId, endMs), lo, hi), parked);
+  const haltedMs = totalMs(halted);
+  const reviewing = subtractIntervals(
+    clampIntervals(reviewingIntervals(phaseEvents, stepRuns, run.runId, endMs, runEvents), lo, hi),
+    [...parked, ...halted]
   );
+  const reviewingMs = totalMs(reviewing);
+  // The worker's turns, placed. Model time is a magnitude inside them, so the part of
+  // a turn that was NOT inference — tools, hooks, the agent's client — is the turn
+  // less the model time, floored: a run recorded before turn brackets existed has
+  // no turns and reads exactly as it did.
+  const turns = subtractIntervals(
+    clampIntervals(workerTurnIntervals(runEvents, stepRuns, run.runId, endMs), lo, hi),
+    [...parked, ...halted, ...reviewing]
+  );
+  const agentMs = Math.max(0, totalMs(turns) - workingMs);
 
   const spanActiveMs = stepRuns.reduce((acc, s) => {
     const a = ms(s.startedAt), b = ms(s.finishedAt);
     return acc + (a !== null && b !== null && b > a ? b - a : 0);
   }, 0);
 
-  const residual = elapsedMs - workingMs - parkedMs;
-  // working and parked are disjoint by construction (a parked agent is not
-  // computing), so a negative residual means one of the three inputs is wrong.
-  // Floor it and SAY SO — a silently clamped number is the failure this screen exists
-  // to fix.
+  const residual = elapsedMs - workingMs - agentMs - parkedMs - haltedMs - reviewingMs;
+  // The placed terms are disjoint by construction and working cannot overlap any of
+  // them (a parked, halted or judged agent is not computing), so a negative residual
+  // means one of the inputs is wrong. Floor it and SAY SO — a silently clamped number
+  // is the failure this screen exists to fix.
   const integrityFlag =
     residual < 0
-      ? `durations do not reconcile: elapsed ${elapsedMs}ms < working ${workingMs}ms + parked ${parkedMs}ms`
+      ? `durations do not reconcile: elapsed ${elapsedMs}ms < working ${workingMs}ms + agent ${agentMs}ms + parked ${parkedMs}ms` +
+        ` + halted ${haltedMs}ms + reviewing ${reviewingMs}ms`
       : null;
 
   return {
     elapsedMs,
     workingMs,
+    agentMs,
     parkedMs,
+    haltedMs,
+    reviewingMs,
     unaccountedMs: Math.max(0, residual),
     spanActiveMs,
     accruing: LIVE_RUN_STATUSES.has(run.status),
@@ -429,12 +609,25 @@ export function buildSpans(input: {
   stepNames: Map<string, string>;
   interventions: Intervention[];
   nowMs: number;
+  phaseEvents?: StepPhaseEvent[];
+  runEvents?: RunEvent[];
 }): RunTraceSpan[] {
   const { run, stepRuns, transitions, stepNames, interventions, nowMs } = input;
+  const endMs = runTerminalMs(run, stepRuns, nowMs);
   // Merged ONCE for the whole run, then clipped per span. Merging is what keeps
   // two simultaneously-parked step runs from double-counting into one span, and
   // doing it once means every span clips the same interval set.
   const parks = mergeIntervals(parkIntervals(interventions, nowMs));
+  // Same precedence as computeDurations — reviewing yields to parked — so a span's
+  // terms and the run's are the same partition read at two scales.
+  const reviewing = subtractIntervals(
+    reviewingIntervals(input.phaseEvents ?? [], stepRuns, run.runId, endMs, input.runEvents ?? []),
+    parks
+  );
+  const turns = subtractIntervals(
+    workerTurnIntervals(input.runEvents ?? [], stepRuns, run.runId, endMs),
+    [...parks, ...reviewing]
+  );
   // The last completion per step template across the WHOLE run — the same rule
   // computeCost uses for `supersededUsd`, so the log and the money agree.
   const lastCompletionByStep = new Map<string, string>();
@@ -450,6 +643,13 @@ export function buildSpans(input: {
     if (id == null) continue;
     (byStepRun.get(id) ?? byStepRun.set(id, []).get(id)!).push(t);
   }
+  // Steps whose revise budget ran out. The escalation produces no completion and
+  // no relaunch, so this event is the only record that it happened.
+  const reviseCappedStepRunIds = new Set(
+    (input.runEvents ?? [])
+      .filter((e) => e.type === "workflow.step.revise_capped" && e.stepRunId != null)
+      .map((e) => e.stepRunId as string)
+  );
 
   return stepRuns.map((s) => {
     const own = byStepRun.get(s.stepRunId) ?? [];
@@ -461,10 +661,10 @@ export function buildSpans(input: {
     const sp = final ? sourcesPassed(ev, rf) : null;
 
     const startedMs = ms(s.startedAt), finishedMs = ms(s.finishedAt);
-    const parkedMs =
-      startedMs === null || finishedMs === null || finishedMs <= startedMs
-        ? null
-        : totalMs(clampIntervals(parks, startedMs, finishedMs));
+    const bracketed = startedMs !== null && finishedMs !== null && finishedMs > startedMs;
+    const parkedMs = bracketed ? totalMs(clampIntervals(parks, startedMs, finishedMs)) : null;
+    const reviewingMs = bracketed ? totalMs(clampIntervals(reviewing, startedMs, finishedMs)) : null;
+    const turnMs = bracketed ? totalMs(clampIntervals(turns, startedMs, finishedMs)) : null;
     const tier: VerificationTier | null = final
       ? classifyTier({ transition: final.transition, templateVersion: run.templateVersion, stepTemplateId: s.stepTemplateId })
       : null;
@@ -485,6 +685,8 @@ export function buildSpans(input: {
         ? null
         : completes.reduce((acc, t) => acc + (t.transition.telemetry?.latency_ms ?? 0), 0),
       parkedMs,
+      reviewingMs,
+      turnMs,
       status: s.status,
       blockedReason: s.blockedReason,
       // A span launched more than once was restarted; the launch/complete pairing is
@@ -492,6 +694,8 @@ export function buildSpans(input: {
       restarts: Math.max(0, launches - 1),
       completions: completes.length,
       stallRescues: s.stallRescues,
+      reviseAttempts: s.reviseAttempts,
+      reviseCapped: reviseCappedStepRunIds.has(s.stepRunId),
       cost: spanCost(completes),
       models: [...new Set(completes.map((t) => t.transition.telemetry?.model).filter((m): m is string => m != null))],
       completionLog: completes.map((t) => ({
@@ -574,6 +778,48 @@ export function deriveTermination(
   return { cause: "unknown", evidence: null };
 }
 
+/**
+ * Events that mean WORK STARTED. A stop that is honoured is followed by none of
+ * them: no new step launched, no worker prompted. Deliberately narrow — a step
+ * FINISHING after a stop is the in-flight turn landing, not the harness starting
+ * something new, and counting it would report a violation for a stop that worked.
+ */
+const WORK_START_EVENTS = new Set(["workflow.step.started", "workflow.worker.prompted"]);
+
+/**
+ * Whether the harness honoured the operator's stop.
+ *
+ * The window runs from the LAST stop request to the next `workflow.run.started`,
+ * which is the operator asking for the work to continue — anything after a resume
+ * is authorised, so the window closes there rather than at the run's end. Work
+ * starting inside that window is the violation, and the event type that started
+ * it is carried as the evidence so the verdict can be audited rather than trusted.
+ */
+export function computeStopCompliance(runEvents: RunEvent[], runId: string): StopCompliance {
+  const own = runEvents.filter((e) => e.workflowRunId === runId);
+  const requests = own.filter((e) => e.type === "workflow.run.stop_requested");
+  if (requests.length === 0) {
+    return { requested: 0, lastRequestedAt: null, honored: null, violationEvidence: null };
+  }
+  const lastRequestedAt = requests[requests.length - 1].createdAt;
+  let violationEvidence: string | null = null;
+  for (const e of own) {
+    if (e.createdAt <= lastRequestedAt) continue;
+    // A resume closes the window: the operator asked for this.
+    if (e.type === "workflow.run.started") break;
+    if (WORK_START_EVENTS.has(e.type)) {
+      violationEvidence = e.type;
+      break;
+    }
+  }
+  return {
+    requested: requests.length,
+    lastRequestedAt,
+    honored: violationEvidence === null,
+    violationEvidence,
+  };
+}
+
 export function buildRunSummary(input: {
   run: RunRow;
   stepRuns: RunStepRunRow[];
@@ -584,8 +830,11 @@ export function buildRunSummary(input: {
   runEvents: RunEvent[];
   nowMs: number;
   humanParks?: HumanPark[];
+  /** Clips `durations` to the window opening here; everything else is the run's own. */
+  fromMs?: number;
+  phaseEvents?: StepPhaseEvent[];
 }): RunSummary {
-  const { run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs } = input;
+  const { run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs, fromMs, phaseEvents } = input;
   const humanParks = input.humanParks ?? [];
   const termination = deriveTermination(run, stepRuns, transitions);
   return {
@@ -601,7 +850,7 @@ export function buildRunSummary(input: {
     blockedReason: run.blockedReason,
     terminationCause: termination.cause,
     terminationEvidence: termination.evidence,
-    durations: computeDurations({ run, stepRuns, transitions, interventions, nowMs }),
+    durations: computeDurations({ run, stepRuns, transitions, interventions, nowMs, fromMs, runEvents, phaseEvents }),
     progress: computeProgress({ run, stepRuns, transitions, activityEvents, runEvents, nowMs }),
     cost: computeCost(transitions, stepRuns),
     stepsDelivered: stepRuns.filter((s) => DELIVERED.has(s.status)).length,
@@ -609,6 +858,7 @@ export function buildRunSummary(input: {
     spanRelaunches: spans.reduce((acc, s) => acc + s.restarts, 0),
     retriedAttempts: spans.filter((s) => s.attempt > 1).length,
     openInterventions: interventions.filter((iv) => iv.open).length,
+    stopCompliance: computeStopCompliance(runEvents, run.runId),
     awaitingYou: computeAwaitingYou(interventions, humanParks),
   };
 }
@@ -651,13 +901,14 @@ export function buildRunDetail(input: {
   sourceKinds: Map<string, string>;
   stepNames: Map<string, string>;
   nowMs: number;
+  phaseEvents?: StepPhaseEvent[];
 }): RunDetail {
-  const { run, stepRuns, transitions, events, runEvents, sourceKinds, stepNames, nowMs } = input;
+  const { run, stepRuns, transitions, events, runEvents, sourceKinds, stepNames, nowMs, phaseEvents } = input;
   const interventions = buildInterventions({ events, sourceKinds, run, nowMs });
-  const spans = buildSpans({ run, stepRuns, transitions, stepNames, interventions, nowMs });
+  const spans = buildSpans({ run, stepRuns, transitions, stepNames, interventions, nowMs, phaseEvents, runEvents });
   const summary = buildRunSummary({
     run, stepRuns, transitions, interventions, spans,
-    activityEvents: events, runEvents, nowMs,
+    activityEvents: events, runEvents, nowMs, phaseEvents,
   });
   return {
     run: summary,

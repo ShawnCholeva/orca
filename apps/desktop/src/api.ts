@@ -2282,9 +2282,12 @@ export async function getSessionIntervals(from: string, to: string): Promise<Ses
   return body.sessions;
 }
 
-export async function getRunSummaries(limit = 50): Promise<RunSummary[]> {
+/** With `from`, each run's durations cover only the window opening there. */
+export async function getRunSummaries(limit = 50, from?: string): Promise<RunSummary[]> {
   const { baseUrl, token } = await loadConfig();
-  const res = await fetch(`${baseUrl}/v1/metrics/runs?limit=${limit}`, { headers: authHeaders(token) });
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (from !== undefined) q.set("from", from);
+  const res = await fetch(`${baseUrl}/v1/metrics/runs?${q}`, { headers: authHeaders(token) });
   const body = await parseResponse(res, z.object({ runs: z.array(RunSummary) }));
   return body.runs;
 }

@@ -16,6 +16,13 @@ export interface OrchestratorLlmClient {
   }): Promise<{ text: string }>;
 }
 
+export interface TurnScope {
+  goalId: string;
+  runId: string;
+  stepRunId: string;
+  triggerKind: OrchestratorTriggerKind;
+}
+
 export interface MediatorDeps {
   llm: OrchestratorLlmClient;
   buildContext: (args: {
@@ -24,6 +31,12 @@ export interface MediatorDeps {
     stepRunId: string;
   }) => OrchestratorInvocationContext;
   composePrompt: (input: OrchestratorPromptInput) => OrchestratorPrompt;
+  /**
+   * Observes each invocation as a placed interval. Every orchestrator turn passes
+   * through `invoke`, so this is the one seam where the orchestrator's own wall
+   * clock can be written down; the judge/refute phases cover only two of its kinds.
+   */
+  turns?: { started(scope: TurnScope): void; finished(scope: TurnScope): void };
 }
 
 export interface MediatorInvokeInput {
@@ -51,6 +64,16 @@ export class OrchestratorMediator {
   }
 
   async invoke(input: MediatorInvokeInput): Promise<OrchestratorAction> {
+    const scope: TurnScope = { goalId: input.goalId, runId: input.runId, stepRunId: input.stepRunId, triggerKind: input.triggerKind };
+    this.deps.turns?.started(scope);
+    try {
+      return await this.invokeTurn(input);
+    } finally {
+      this.deps.turns?.finished(scope);
+    }
+  }
+
+  private async invokeTurn(input: MediatorInvokeInput): Promise<OrchestratorAction> {
     const context = this.deps.buildContext({
       goalId: input.goalId,
       runId: input.runId,

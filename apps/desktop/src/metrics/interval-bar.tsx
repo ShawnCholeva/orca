@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
 
-// The span-interior bar: how a run's elapsed time decomposes into time we watched,
-// time it spent waiting on a person, and time we cannot account for.
+// The span-interior bar: how a run's elapsed time decomposes into model time, the
+// worker's turn beyond it, the orchestrator's turns, time waiting on a person, time
+// the run stood blocked until someone restarted it, and time we cannot account for.
 //
 // Two refusals are built into this component on purpose.
 //
@@ -10,8 +11,8 @@ import type { CSSProperties } from "react";
 //    inside it is not derivable. A positioned timeline would look authoritative
 //    and be fabricated, so there is no prop that would let a caller ask for one.
 //
-// 2. It will not normalize a broken invariant. `working + parked + unaccounted`
-//    must equal `elapsed`; when it doesn't, the bar says so rather than scaling
+// 2. It will not normalize a broken invariant. `working + agent + parked + halted +
+//    reviewing + unaccounted` must equal `elapsed`; when it doesn't, the bar says so rather than scaling
 //    the parts to fit. Scaling to fit is precisely how a wrong-but-positive
 //    unaccounted stays hidden — an integrity check catches a negative residual,
 //    but only the reader catches a plausible one, and only if we show the terms.
@@ -42,13 +43,22 @@ type Ms = number | null | undefined;
 export function IntervalBar({
   elapsedMs,
   workingMs,
+  agentMs,
   parkedMs,
+  haltedMs,
+  reviewingMs,
   unaccountedMs,
   style,
 }: {
   elapsedMs: Ms;
   workingMs: Ms;
+  /** The worker's turn beyond model inference: tools, hooks, its own client. */
+  agentMs?: Ms;
   parkedMs: Ms;
+  /** The run blocked and standing still until restarted. Optional: a span never holds one. */
+  haltedMs?: Ms;
+  /** The orchestrator judging and independently checking output. */
+  reviewingMs?: Ms;
   unaccountedMs: Ms;
   style?: CSSProperties;
 }) {
@@ -89,16 +99,29 @@ export function IntervalBar({
   }
 
   const working = workingMs ?? 0;
+  const agent = agentMs ?? 0;
   const parked = parkedMs ?? 0;
+  const halted = haltedMs ?? 0;
+  const reviewing = reviewingMs ?? 0;
   const unaccounted = unaccountedMs ?? 0;
-  const sum = working + parked + unaccounted;
+  const sum = working + agent + parked + halted + reviewing + unaccounted;
 
   // Tolerate sub-second float drift, nothing more.
   const mismatch = elapsedMs <= 0 || Math.abs(sum - elapsedMs) > SECOND;
 
+  // The three original terms are always named; blocked and reviewing only when there
+  // was any — most spans have neither, and "0s blocked" on every row is noise that
+  // teaches the reader to skip the line the one time it matters.
+  const terms = [
+    `${formatDuration(working)} working`,
+    ...(agent > 0 ? [`${formatDuration(agent)} between model calls`] : []),
+    `${formatDuration(parked)} parked`,
+    ...(halted > 0 ? [`${formatDuration(halted)} blocked`] : []),
+    ...(reviewing > 0 ? [`${formatDuration(reviewing)} reviewing`] : []),
+    `${formatDuration(unaccounted)} unaccounted`,
+  ];
   const readout =
-    `${formatDuration(elapsedMs)} elapsed · ${formatDuration(working)} working · ` +
-    `${formatDuration(parked)} parked · ${formatDuration(unaccounted)} unaccounted` +
+    `${formatDuration(elapsedMs)} elapsed · ${terms.join(" · ")}` +
     (mismatch ? ` — these do not add up to the elapsed time, so the split can't be trusted.` : "");
 
   if (mismatch) {
@@ -132,7 +155,8 @@ export function IntervalBar({
   // Two channels, each answering one question, because one channel answering three
   // was unreadable without a legend:
   //
-  //   HUE      whose time was this   — green Orca, violet the reader
+  //   HUE      whose time was this   — green the worker, blue the orchestrator,
+  //                                    violet the reader, grey nobody's (blocked)
   //   MATERIAL did we measure it     — solid painted, hatched ground
   //
   // Unaccounted is the GROUND rather than a third segment. As a trailing block it
@@ -175,8 +199,17 @@ export function IntervalBar({
     >
       {/* Watched. */}
       <span data-seg="working" style={{ width: pctOf(working), background: "var(--run)" }} />
+      {/* The rest of the worker's turn — tools, hooks, its client. The worker's
+          hue, one step over: same owner, different activity. */}
+      <span data-seg="agent" style={{ width: pctOf(agent), background: "var(--run-2)" }} />
+      {/* The orchestrator judging and checking — Orca's time too, but not the
+          worker's, so a third hue rather than a shade of green. */}
+      <span data-seg="reviewing" style={{ width: pctOf(reviewing), background: "var(--info)" }} />
       {/* Waiting on a person — a different kind of time, not a lesser one. */}
       <span data-seg="parked" style={{ width: pctOf(parked), background: "var(--accent-2)" }} />
+      {/* Blocked and standing still until restarted. Neutral: the run list renders a
+          run the harness stopped in this grey for the same reason. */}
+      <span data-seg="halted" style={{ width: pctOf(halted), background: "var(--text-3)" }} />
       {/* No third child: the width unaccounted would have occupied is the ground
           showing through. `unaccountedMs` is still taken as an INPUT and still
           checked against the sum above — deriving it as track-minus-painted would

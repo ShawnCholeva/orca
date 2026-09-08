@@ -15,7 +15,7 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
     blockedReason: null, terminationCause: "completed", terminationEvidence: null,
     durations: {
       elapsedMs: 3_600_000, workingMs: 600_000, parkedMs: 2_400_000,
-      unaccountedMs: 600_000, spanActiveMs: 1_200_000, accruing: false, integrityFlag: null,
+      unaccountedMs: 600_000, agentMs: 0, haltedMs: 0, reviewingMs: 0, spanActiveMs: 1_200_000, accruing: false, integrityFlag: null,
     },
     cost: {
       usd: 61.52, wastedUsd: 50.66, failedUsd: 48.02, supersededUsd: 2.64,
@@ -27,6 +27,7 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
     // INTERESTING case is the opposite — a live run holding an open card — so this
     // fixture should not be read as covering it.
     awaitingYou: { count: 0, sinceMs: null, sourceKind: null },
+    stopCompliance: { requested: 0, lastRequestedAt: null, honored: null, violationEvidence: null },
     // A completed run: progress and signal agree, and nothing was mid-flight, so
     // silence is conclusive. A run whose signal outran its progress is the
     // "moving but not advancing" case and is asserted separately.
@@ -44,8 +45,9 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     workflowRunId: "r1", workflowStepRunId: "sr1", goalId: "g1",
     stepTemplateId: "triage", name: "Triage", ordinal: 0, attempt: 1, kind: "step",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:30:00.000Z",
-    elapsedMs: 1_800_000, workingMs: 600_000, parkedMs: 0,
+    elapsedMs: 1_800_000, workingMs: 600_000, parkedMs: 0, reviewingMs: 0, turnMs: 0,
     status: "passed", blockedReason: null, restarts: 0, completions: 1, stallRescues: 0,
+    reviseAttempts: 0, reviseCapped: false,
     cost: { usd: 1.52, tokensIn: 10, tokensOut: 20, cacheReadTokens: null, cacheCreationTokens: null, state: "reported" },
     models: [], completionLog: [],
     tier: "partially_verified",
@@ -166,10 +168,10 @@ describe("terminatedRuns", () => {
     // accruing — pooled, it would dominate any ratio forever and keep growing.
     const runs = [
       summary({ runId: "done", terminationCause: "completed", durations: {
-        elapsedMs: 60_000, workingMs: 60_000, parkedMs: 0, unaccountedMs: 0,
+        elapsedMs: 60_000, workingMs: 60_000, parkedMs: 0, unaccountedMs: 0, agentMs: 0, haltedMs: 0, reviewingMs: 0,
         spanActiveMs: 0, accruing: false, integrityFlag: null } }),
       summary({ runId: "live", terminationCause: "running", durations: {
-        elapsedMs: 141_840_000, workingMs: 0, parkedMs: 141_120_000, unaccountedMs: 720_000,
+        elapsedMs: 141_840_000, workingMs: 0, parkedMs: 141_120_000, unaccountedMs: 720_000, agentMs: 0, haltedMs: 0, reviewingMs: 0,
         spanActiveMs: 0, accruing: true, integrityFlag: null } }),
     ];
     expect(terminatedRuns(runs).map((r) => r.runId)).toEqual(["done"]);
@@ -250,6 +252,42 @@ describe("RunDetailPanel", () => {
     render(<RunDetailPanel detail={detail()} onBack={() => {}} />);
     const text = document.body.textContent ?? "";
     expect(text).toContain("1h 0m = 10m working + 40m waiting on you + 10m unaccounted");
+  });
+
+  it("names blocked and reviewing time in the composition when there was any, and it still adds up", () => {
+    render(<RunDetailPanel detail={detail({ run: summary({ durations: {
+      elapsedMs: 3_600_000, workingMs: 600_000, agentMs: 300_000, parkedMs: 1_800_000, haltedMs: 300_000, reviewingMs: 300_000,
+      unaccountedMs: 300_000, spanActiveMs: 0, accruing: false, integrityFlag: null,
+    } }) })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("1h 0m = 10m working + 5m 0s between model calls + 30m waiting on you + 5m 0s blocked + 5m 0s reviewing + 5m 0s unaccounted");
+    expect(document.querySelectorAll('[data-seg="mismatch"]')).toHaveLength(0);
+  });
+
+  it("reads a span's turn beyond its model time as between model calls", () => {
+    render(<RunDetailPanel detail={detail({ spans: [span({ turnMs: 900_000 })] })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("30m · 10m observed, 5m 0s between model calls, 15m unaccounted");
+    expect(document.querySelectorAll('[data-seg="mismatch"]')).toHaveLength(0);
+  });
+
+  it("bounds a span's model time by its interior instead of flagging a healthy row", () => {
+    // Live: a crashed Triage attempt, 54m elapsed with 53m parked and 31s of judging,
+    // reported 44s of model time — API calls run concurrently, so the sum outruns
+    // the 24s of wall clock left. The Workflows page already clamps; unclamped here
+    // it drew the red "can't be trusted" bar on a row that is fine.
+    render(<RunDetailPanel detail={detail({
+      spans: [span({ elapsedMs: 3_270_000, workingMs: 44_000, parkedMs: 3_215_000, reviewingMs: 31_000 })],
+    })} onBack={() => {}} />);
+    expect(document.querySelectorAll('[data-seg="mismatch"]')).toHaveLength(0);
+    expect(document.body.textContent).toContain("24s observed, 53m waiting on you, 31s reviewing, 0s unaccounted");
+  });
+
+  it("takes a span's reviewing time out of its unaccounted remainder", () => {
+    render(<RunDetailPanel detail={detail({ spans: [span({ reviewingMs: 300_000 })] })} onBack={() => {}} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("30m · 10m observed, 5m 0s reviewing, 15m unaccounted");
+    expect(document.querySelectorAll('[data-seg="mismatch"]')).toHaveLength(0);
   });
 
   it("names an abandoned card as debris, never as waiting on you", () => {
@@ -678,5 +716,57 @@ describe("what the safety floor stopped", () => {
   it("omits the section when nothing needed a decision", () => {
     render(<RunDetailPanel detail={detail({ harnessErrors: [], toolDecisions: [] })} onBack={() => {}} />);
     expect(document.body.textContent).not.toContain("safety floor");
+  });
+});
+
+describe("stop compliance", () => {
+  it("says so when a run kept working after the operator stopped it", () => {
+    render(<RunRow onOpen={() => {}} run={summary({
+      stopCompliance: {
+        requested: 1, lastRequestedAt: "2026-09-01T00:10:00.000Z",
+        honored: false, violationEvidence: "workflow.step.started",
+      },
+    })} />);
+    expect(screen.getByText("You asked this run to stop and it kept working.")).toBeTruthy();
+  });
+
+  it("stays silent when the stop was honored", () => {
+    render(<RunRow onOpen={() => {}} run={summary({
+      stopCompliance: {
+        requested: 1, lastRequestedAt: "2026-09-01T00:10:00.000Z",
+        honored: true, violationEvidence: null,
+      },
+    })} />);
+    expect(screen.queryByText(/kept working/)).toBeNull();
+  });
+
+  it("stays silent when no stop was ever asked for", () => {
+    render(<RunRow onOpen={() => {}} run={summary()} />);
+    expect(screen.queryByText(/kept working/)).toBeNull();
+  });
+});
+
+describe("span interventions", () => {
+  it("reports a step that was sent back until its budget ran out", () => {
+    // Without this the row was silent: a capped revise produces no extra
+    // completion and no relaunch, so every other counter on the line read zero.
+    render(
+      <RunDetailPanel
+        detail={detail({ spans: [span({ reviseAttempts: 3, reviseCapped: true, completions: 1 })] })}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.getByText(/sent back 3x, then escalated/)).toBeTruthy();
+  });
+
+  it("does not double-count revisions the completion counter already shows", () => {
+    render(
+      <RunDetailPanel
+        detail={detail({ spans: [span({ reviseAttempts: 1, reviseCapped: false, completions: 2 })] })}
+        onBack={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/for revision/)).toBeNull();
+    expect(screen.getByText(/sent back once/)).toBeTruthy();
   });
 });

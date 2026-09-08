@@ -30,6 +30,7 @@ export type RunStepRunRow = {
   finishedAt: string | null;
   blockedReason: string | null;
   stallRescues: number;
+  reviseAttempts: number;
 };
 
 export type RunTransition = {
@@ -37,8 +38,14 @@ export type RunTransition = {
   stepTemplateId: string | null;
 };
 
-/** Any run-attributable event: its payload names a workflowRunId. */
-export type RunEvent = { createdAt: string; type: string; workflowRunId: string };
+/** Any run-attributable event: its payload names a workflowRunId. `stepRunId` when the payload carried one. */
+export type RunEvent = { createdAt: string; type: string; workflowRunId: string; stepRunId: string | null };
+
+/**
+ * One `workflow.step.phase_changed` row: the orchestrator entering a judge or
+ * independent-check turn on a step run (`phase` set) or leaving it (`phase` null).
+ */
+export type StepPhaseEvent = { createdAt: string; workflowRunId: string; stepRunId: string; phase: string | null };
 
 /** One `activity.changed` row, payload parsed in TS. */
 export type ActivityEvent = {
@@ -98,19 +105,21 @@ export function getRun(db: Database.Database, runId: string): RunRow | null {
 export function listStepRunsByRun(db: Database.Database, runId: string): RunStepRunRow[] {
   const rows = db.prepare(
     `SELECT id, goal_id, step_template_id, ordinal, attempt, status,
-            started_at, finished_at, blocked_reason, stall_rescues
+            started_at, finished_at, blocked_reason, stall_rescues, revise_attempts
      FROM workflow_step_runs WHERE workflow_run_id = ?
      ORDER BY ordinal ASC, attempt ASC, id ASC`
   ).all(runId) as Array<{
     id: string; goal_id: string; step_template_id: string; ordinal: number;
     attempt: number; status: string; started_at: string | null;
     finished_at: string | null; blocked_reason: string | null; stall_rescues: number;
+    revise_attempts: number;
   }>;
   return rows.map((r) => ({
     stepRunId: r.id, goalId: r.goal_id, stepTemplateId: r.step_template_id,
     ordinal: r.ordinal, attempt: r.attempt, status: r.status,
     startedAt: r.started_at, finishedAt: r.finished_at,
     blockedReason: r.blocked_reason, stallRescues: r.stall_rescues,
+    reviseAttempts: r.revise_attempts ?? 0,
   }));
 }
 
@@ -185,10 +194,39 @@ export function listRunEventsByGoal(db: Database.Database, goalId: string): RunE
   ).all(goalId) as Array<{ type: string; payload: string; created_at: string }>;
   const out: RunEvent[] = [];
   for (const r of rows) {
-    let p: { workflowRunId?: unknown };
+    let p: { workflowRunId?: unknown; stepRunId?: unknown };
     try { p = JSON.parse(r.payload); } catch { continue; }
     if (typeof p.workflowRunId !== "string") continue;
-    out.push({ createdAt: r.created_at, type: r.type, workflowRunId: p.workflowRunId });
+    out.push({
+      createdAt: r.created_at, type: r.type, workflowRunId: p.workflowRunId,
+      stepRunId: typeof p.stepRunId === "string" ? p.stepRunId : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Orchestrator phase brackets for a goal, oldest first. The phase is live-only state
+ * on the step run — the event stream is the only durable record of when the judge
+ * and refute turns ran, which is why it is read from here and not from the row.
+ */
+export function listStepPhaseEventsByGoal(db: Database.Database, goalId: string): StepPhaseEvent[] {
+  const rows = db.prepare(
+    `SELECT payload, created_at FROM events
+     WHERE goal_id = ? AND type = 'workflow.step.phase_changed'
+     ORDER BY seq ASC`
+  ).all(goalId) as Array<{ payload: string; created_at: string }>;
+  const out: StepPhaseEvent[] = [];
+  for (const r of rows) {
+    let p: { workflowRunId?: unknown; stepRunId?: unknown; phase?: unknown };
+    try { p = JSON.parse(r.payload); } catch { continue; }
+    if (typeof p.workflowRunId !== "string" || typeof p.stepRunId !== "string") continue;
+    out.push({
+      createdAt: r.created_at,
+      workflowRunId: p.workflowRunId,
+      stepRunId: p.stepRunId,
+      phase: typeof p.phase === "string" ? p.phase : null,
+    });
   }
   return out;
 }

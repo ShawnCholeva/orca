@@ -45,10 +45,10 @@ The UI must visually distinguish D from O. This is not decoration: an `independe
 
 ---
 
-## 2. Durations — four fields that sum
+## 2. Durations — the fields that sum
 
 ```
-elapsedMs  =  workingMs  +  parkedMs  +  unaccountedMs
+elapsedMs  =  workingMs  +  agentMs  +  parkedMs  +  haltedMs  +  reviewingMs  +  unaccountedMs
 ```
 
 | Field | Definition | Source | Mark |
@@ -57,7 +57,14 @@ elapsedMs  =  workingMs  +  parkedMs  +  unaccountedMs
 | `accruing` | `true` only when the **run** is non-terminal | derived | D |
 | `workingMs` | Σ `telemetry.latency_ms` over the run's `step_complete` transitions. Provider-reported **model time** — a magnitude, not a placed interval. | `TelemetryFacet` | D |
 | `parkedMs` | **Union of merged** `paused_for_input` intervals (§5) — never a sum | `events` (`activity.changed`) | D |
-| `unaccountedMs` | `elapsedMs − workingMs − parkedMs` | derived | D |
+| `agentMs` | The workers' turns (`workflow.worker.prompted` → `workflow.worker.responded`, recorded at the one delivery seam and the Stop hook), **outside every term above**, less `workingMs`. Tools, hooks and the agent's client between model calls. Zero on runs recorded before the brackets existed. | `events` | D |
+| `haltedMs` | The run stood still with no card open: `workflow.run.blocked` → the `workflow.run.started` that resumed it, **outside parks**. A block never resumed ends at the run's terminal moment, which for a still-blocked run is the block itself (§2.1), so it contributes nothing. | `events` | D |
+| `reviewingMs` | The orchestrator's turns: the union of the judge/independent-check phases (`workflow.step.phase_changed`) and the mediator's `workflow.orchestrator.turn_started/finished` brackets, which also cover next-decision and user-message turns. Clipped to the step run's own bracket, **outside parks and halts**. A turn the daemon lost to a restart counts until the turn that replaced it began. | `events` | D |
+| `unaccountedMs` | `elapsedMs − workingMs − agentMs − parkedMs − haltedMs − reviewingMs` | derived | D |
+
+> **The placed terms are disjoint by precedence — parked, then halted, then reviewing, then the workers' turns.** Each is computed against the ones before it (interval subtraction), so a moment lands in exactly one and the terms stay addable. Live: run `01a07568-…` read 26 of its 81 minutes as unaccounted; 7 of them were the run blocked between a crashed step and the restart, and 4 were judge/check turns — both written down and both previously hatched as if nobody knew.
+>
+> `RunTraceSpan.reviewingMs` and `RunTraceSpan.turnMs` are the same partition clipped to the span (the span's `agent` figure is `turnMs − workingMs`, floored); halts fall between spans by construction and have no span-level term. What the residual still holds: the idle wait before a prompt lands in a worker's composer, session startup, dispatch between steps, and the shadow-gate evaluations that go through `shadowAsk` rather than the mediator.
 
 > **`parkedMs` is a merged-interval union, not `SUM(exit − enter)`.** The unique index `idx_activities_one_live_per_step` guarantees one live activity per **step_run**, not per **run** — two step_runs can be parked simultaneously, so parks genuinely overlap. Live: run `01a05a4d-…` has 9 parks across 2 step_runs that naively sum to **3971 min against ~3105 min of elapsed**. Summing exceeds wall-clock and drives `unaccountedMs` negative, firing the integrity flag on healthy data.
 >
@@ -65,9 +72,9 @@ elapsedMs  =  workingMs  +  parkedMs  +  unaccountedMs
 >
 > **Where a merge has not been applied, list the open parks individually and render no total** — an honest omission beats a wrong number.
 
-`unaccountedMs` is the honest name for dispatch latency, hook round-trips, sensor execution, orchestrator turns, and genuinely unobserved interior. **It is a residual, and it must be rendered as such** — it is the "hatched" material in the trace view.
+`unaccountedMs` is the honest name for dispatch latency, hook round-trips, tool execution between model calls, the orchestrator's unphased turns, and genuinely unobserved interior. **It is a residual, and it must be rendered as such** — it is the "hatched" material in the trace view.
 
-**Invariant:** `unaccountedMs >= 0`. `workingMs` and `parkedMs` are disjoint by construction (a parked agent is not computing). If the residual goes negative, one of the two inputs is wrong — floor at zero and **raise a data-integrity flag rather than hiding it**. This is the falsifiability property: three independently-sourced numbers that must add.
+**Invariant:** `unaccountedMs >= 0`. The placed terms are disjoint by construction and `workingMs` cannot overlap any of them (a parked, halted or judged agent is not computing). If the residual goes negative, one of the inputs is wrong — floor at zero and **raise a data-integrity flag rather than hiding it**. This is the falsifiability property: independently-sourced numbers that must add.
 
 ### 2.1 `elapsedMs` for a blocked run holding an open card — the call
 
@@ -322,6 +329,8 @@ Gate cost is **not** `unmetered`. The OTLP receiver is already ingesting gate-se
 ### `GET /v1/metrics/runs`
 
 Per row: `runId, goalId, templateId, templateVersion, templateName, status` (D); `startedAt, finishedAt, elapsedMs, workingMs, parkedMs, unaccountedMs` (D, §2); `costUsd, costWastedUsd, costCoverage{reported,total}` (D, §3); `stepsDelivered, stepsBlocked, restarts, openInterventions` (D); `worstBlockedReason` (D).
+
+`?from=<ISO>` clips the four durations to the window opening there (elapsed and parked by interval; working placed as ending at each `step_complete`, since it is a magnitude with no start of its own). Without it they cover the run's lifetime. The Workflows page passes its window so a run that began days before it contributes only the part inside it.
 
 ### `GET /v1/metrics/runs/:runId`
 

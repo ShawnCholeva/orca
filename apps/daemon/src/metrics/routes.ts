@@ -42,11 +42,17 @@ export function registerMetricsRoutes(server: FastifyInstance, deps: MetricsRout
   // The run-shaped read model: a run is a trace, a step run is a span. Distinct
   // from the per-template aggregate above, which cannot answer "how did THIS run
   // behave" — see docs/superpowers/specs/2026-09-02-run-trace-contract.md.
-  server.get("/v1/metrics/runs", async (request) => {
-    const raw = (request.query as { limit?: string }).limit;
-    const parsed = raw === undefined ? 50 : Number(raw);
+  // `from` clips each run's durations to the window opening there; without it
+  // they cover the run's lifetime.
+  server.get("/v1/metrics/runs", async (request, reply) => {
+    const q = request.query as { limit?: string; from?: string };
+    const parsed = q.limit === undefined ? 50 : Number(q.limit);
     const limit = Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), 1), 200) : 50;
-    return { runs: getRunSummaries(db, { limit }) };
+    if (q.from !== undefined && !Number.isFinite(Date.parse(q.from))) {
+      reply.status(400);
+      return { error: { code: "invalid_window", message: "from must be an ISO timestamp" } };
+    }
+    return { runs: getRunSummaries(db, { limit, fromIso: q.from }) };
   });
 
   server.get("/v1/metrics/runs/:runId", async (request, reply) => {

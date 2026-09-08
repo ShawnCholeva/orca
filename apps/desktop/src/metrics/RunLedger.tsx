@@ -206,8 +206,8 @@ export function headline(runs: RunSummary[]): string {
 // ── the duration decomposition ───────────────────────────────────────────────
 
 function intervalParts(d: RunSummary["durations"]) {
-  const { elapsedMs, workingMs, parkedMs, unaccountedMs } = d;
-  return { elapsedMs, workingMs, parkedMs, unaccountedMs };
+  const { elapsedMs, workingMs, agentMs, parkedMs, haltedMs, reviewingMs, unaccountedMs } = d;
+  return { elapsedMs, workingMs, agentMs, parkedMs, haltedMs, reviewingMs, unaccountedMs };
 }
 
 function DurationTerms({ d }: { d: RunSummary["durations"] }) {
@@ -219,7 +219,13 @@ function DurationTerms({ d }: { d: RunSummary["durations"] }) {
     // that property is what makes the intervention tax falsifiable in front of the
     // reader, and it is load-bearing rather than decorative.
     <span style={{ fontSize: "var(--fs-1)", color: "var(--text-2)", lineHeight: 1.5 }} className="mono">
-      {dur(d.elapsedMs)} = {dur(d.workingMs)} working + {dur(d.parkedMs)} waiting on you
+      {dur(d.elapsedMs)} = {dur(d.workingMs)} working
+      {d.agentMs > 0 ? ` + ${dur(d.agentMs)} between model calls` : ""}
+      {" + "}{dur(d.parkedMs)} waiting on you
+      {/* Named only when present: most runs never blocked, and a "0s blocked" term
+          on every line would be read past on the one line where it isn't zero. */}
+      {d.haltedMs > 0 ? ` + ${dur(d.haltedMs)} blocked` : ""}
+      {d.reviewingMs > 0 ? ` + ${dur(d.reviewingMs)} reviewing` : ""}
       {" + "}{dur(d.unaccountedMs)} unaccounted
       {d.accruing ? " · still running" : ""}
     </span>
@@ -479,6 +485,18 @@ export function RunRow({ run, onOpen }: { run: RunSummary; onOpen: (id: string) 
             </span>
           )}
         </div>
+        {/* Only ever shown when the answer is "no". A run nobody asked to stop has
+            nothing to report here, and a run that stopped when told did what it was
+            supposed to — neither earns a line. This is the harness disobeying its
+            operator, which is the one autonomy fact that must never be quiet. */}
+        {run.stopCompliance.honored === false && (
+          <div style={{ display: "flex", gap: "var(--sp-2)", alignItems: "stretch" }}>
+            <span style={{ width: 3, borderRadius: 2, background: "var(--err)", flexShrink: 0 }} />
+            <span style={{ fontSize: "var(--fs-2)", color: "var(--err)", fontWeight: 600 }}>
+              You asked this run to stop and it kept working.
+            </span>
+          </div>
+        )}
         {run.durations.integrityFlag && (
           <MeasurementLabel
             state="unmeasurable_structural"
@@ -499,7 +517,69 @@ const PARK_SENTENCE: Record<Intervention["parkState"], string> = {
   resolved: "resolved",
 };
 
+/** The worker's turn inside this span beyond its model time — the same subtraction the run-level term uses. */
+function spanAgentMs(span: RunTraceSpan): number {
+  return Math.max(0, (span.turnMs ?? 0) - (span.workingMs ?? 0));
+}
+
+/**
+ * The span's terms, held addable the way the Workflows page already holds them.
+ *
+ * `workingMs` is a sum of API-call durations, and calls can run concurrently, so on
+ * a short turn it outruns the wall clock that was left after the placed terms — on a
+ * live crashed attempt 44s of model time sat in a 24s interior. Before the placed
+ * terms were named that slack hid inside "unaccounted"; naming them exposed it as a
+ * red "can't be trusted" bar on healthy rows, which teaches the reader to ignore the
+ * one guard that matters. Model time is bounded by the interior instead, and the
+ * residual is what remains.
+ */
+function spanTerms(span: RunTraceSpan) {
+  if (span.elapsedMs == null) return null;
+  const parked = span.parkedMs ?? 0;
+  const reviewing = span.reviewingMs ?? 0;
+  const agent = spanAgentMs(span);
+  const interior = Math.max(0, span.elapsedMs - parked - reviewing - agent);
+  const working = Math.min(span.workingMs ?? 0, interior);
+  return { elapsedMs: span.elapsedMs, workingMs: working, agentMs: agent, parkedMs: parked, reviewingMs: reviewing, unaccountedMs: interior - working };
+}
+
+/**
+ * The interventions a span needed — each a different kind of trouble, and each
+ * counted from a different record, so they are listed rather than summed into one
+ * "retries" figure that would let a reader mistake any of them for the others.
+ */
+function SpanInterventions({ span }: { span: RunTraceSpan }) {
+  const parts: string[] = [];
+  if (span.restarts > 0) parts.push(`relaunched ${span.restarts}x after a crash`);
+  // NOT "redone Nx". `completions` counts step_complete events, and a
+  // veto-then-pass step emits two of them for ONE attempt — so this rendered
+  // "attempt 1 · passed" and "redone 1x" on the same row, which cannot both be
+  // true. The attempt count is beside the step name and is the authority on
+  // retries; this says what the extra event actually was.
+  if (span.completions > 1) {
+    const back = span.completions - 1;
+    parts.push(`finished ${span.completions}x — sent back ${back === 1 ? "once" : `${back} times`}`);
+  }
+  // A stall rescue is the harness nudging a worker that went quiet — a third kind
+  // of intervention, distinct from a crash relaunch and from a revise loop, and
+  // counted on the step run since the beginning.
+  if (span.stallRescues > 0) parts.push(`rescued from a stall ${span.stallRescues}x`);
+  // A revision that never produced another completion leaves no mark on any of
+  // the counts above, so a step sent back three times and then escalated used to
+  // read on this row as if nothing had happened to it.
+  if (span.reviseCapped) {
+    parts.push(`sent back ${span.reviseAttempts}x, then escalated — it never passed`);
+  } else if (span.reviseAttempts > span.completions - 1) {
+    parts.push(`sent back ${span.reviseAttempts}x for revision`);
+  }
+  if (parts.length === 0) return null;
+  return (
+    <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>{parts.join(" · ")}</span>
+  );
+}
+
 function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker: boolean }) {
+  const terms = spanTerms(span);
   return (
     <div
       style={{
@@ -535,13 +615,11 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
             case for either, and the parks section still owns the between-span ones. */}
         <IntervalBar
           elapsedMs={span.elapsedMs}
-          workingMs={span.elapsedMs == null ? null : span.workingMs ?? 0}
+          workingMs={terms === null ? null : terms.workingMs}
+          agentMs={terms?.agentMs}
           parkedMs={span.parkedMs}
-          unaccountedMs={
-            span.elapsedMs == null
-              ? null
-              : Math.max(0, span.elapsedMs - (span.workingMs ?? 0) - (span.parkedMs ?? 0))
-          }
+          reviewingMs={span.reviewingMs}
+          unaccountedMs={terms === null ? null : terms.unaccountedMs}
         />
         {span.elapsedMs == null ? (
           <MeasurementLabel
@@ -558,9 +636,11 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
             {dur(span.elapsedMs)}
             {span.workingMs == null
               ? " · no interior detail recorded"
-              : ` · ${dur(span.workingMs)} observed` +
+              : ` · ${dur(terms!.workingMs)} observed` +
+                (terms!.agentMs ? `, ${dur(terms!.agentMs)} between model calls` : "") +
                 (span.parkedMs ? `, ${dur(span.parkedMs)} waiting on you` : "") +
-                `, ${dur(Math.max(0, span.elapsedMs - span.workingMs - (span.parkedMs ?? 0)))} unaccounted`}
+                (span.reviewingMs ? `, ${dur(span.reviewingMs)} reviewing` : "") +
+                `, ${dur(terms!.unaccountedMs)} unaccounted`}
           </span>
         )}
         {/* No tag here. The duration line beside it already reads "no interior detail
@@ -636,24 +716,7 @@ function SpanRow({ span, showCostMarker }: { span: RunTraceSpan; showCostMarker:
             {span.refuteReason}
           </span>
         )}
-        {(span.restarts > 0 || span.completions > 1 || span.stallRescues > 0) && (
-          <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>
-            {span.restarts > 0 && `relaunched ${span.restarts}x after a crash`}
-            {span.restarts > 0 && span.completions > 1 && " · "}
-            {/* NOT "redone Nx". `completions` counts step_complete events, and a
-                veto-then-pass step emits two of them for ONE attempt — so this rendered
-                "attempt 1 · passed" and "redone 1x" on the same row, which cannot both
-                be true. The attempt count is beside the step name and is the authority
-                on retries; this says what the extra event actually was. */}
-            {span.completions > 1 &&
-              `finished ${span.completions}x — sent back ${span.completions - 1 === 1 ? "once" : `${span.completions - 1} times`}`}
-            {span.stallRescues > 0 && (span.restarts > 0 || span.completions > 1) && " · "}
-            {/* A stall rescue is the harness nudging a worker that went quiet — a
-                third kind of intervention, distinct from a crash relaunch and from a
-                revise loop, and counted on the step run since the beginning. */}
-            {span.stallRescues > 0 && `rescued from a stall ${span.stallRescues}x`}
-          </span>
-        )}
+        <SpanInterventions span={span} />
       </div>
 
       <div style={{ display: "grid", gap: 2, justifyItems: "end" }}>

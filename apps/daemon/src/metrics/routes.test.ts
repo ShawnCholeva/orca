@@ -77,6 +77,28 @@ describe("GET /v1/metrics/sessions", () => {
   });
 });
 
+describe("GET /v1/metrics/runs", () => {
+  it("clips each run's durations to the window when one is given", async () => {
+    const db = openTestDb(); seed(db);
+    const f = Fastify(); registerMetricsRoutes(f, { db });
+    // The seeded run lasted 1h ago → 30m ago. A window opening 45m ago holds 15m of it.
+    const from = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    const res = await f.inject({ method: "GET", url: `/v1/metrics/runs?from=${from}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { runs: Array<{ runId: string; durations: { elapsedMs: number; workingMs: number } }> };
+    expect(body.runs.map((r) => r.runId)).toEqual(["run1"]);
+    expect(Math.abs(body.runs[0]!.durations.elapsedMs - 15 * 60 * 1000)).toBeLessThan(1000);
+    expect(body.runs[0]!.durations.workingMs).toBe(100);
+  });
+
+  it("rejects a window start that is not a timestamp", async () => {
+    const db = openTestDb(); seed(db);
+    const f = Fastify(); registerMetricsRoutes(f, { db });
+    const res = await f.inject({ method: "GET", url: "/v1/metrics/runs?from=yesterday" });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe("metrics routes", () => {
   it("GET /v1/metrics/templates returns a summary array", async () => {
     const db = openTestDb(); seed(db);

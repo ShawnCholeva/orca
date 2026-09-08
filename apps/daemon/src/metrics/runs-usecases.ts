@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { RunDetail, RunSummary } from "@orca/contracts";
 import {
   activitySourceKinds, getRun, listActivityEventsByGoal, listRunEventsByGoal, listRuns,
-  listStepRunsByRun, listTransitionsByRun,
+  listStepPhaseEventsByGoal, listStepRunsByRun, listTransitionsByRun,
 } from "./runs-fetch.js";
 import { buildInterventions, buildRunDetail, buildRunSummary, buildSpans, type HumanPark } from "./runs.js";
 import type { Intervention } from "@orca/contracts";
@@ -95,14 +95,16 @@ function stepNamesForRun(db: Database.Database, runId: string, templateId: strin
 
 export function getRunSummaries(
   db: Database.Database,
-  opts: { limit?: number; nowIso?: string } = {}
+  opts: { limit?: number; nowIso?: string; fromIso?: string } = {}
 ): RunSummary[] {
   const nowMs = Date.parse(opts.nowIso ?? new Date().toISOString());
+  const fromMs = opts.fromIso === undefined ? undefined : Date.parse(opts.fromIso);
   return listRuns(db, opts.limit ?? 50).map((run) => {
     const stepRuns = listStepRunsByRun(db, run.runId);
     const transitions = listTransitionsByRun(db, run.runId);
     const activityEvents = listActivityEventsByGoal(db, run.goalId);
     const runEvents = listRunEventsByGoal(db, run.goalId);
+    const phaseEvents = listStepPhaseEventsByGoal(db, run.goalId);
     const interventions = buildInterventions({
       events: activityEvents,
       sourceKinds: activitySourceKinds(db, run.goalId),
@@ -110,11 +112,11 @@ export function getRunSummaries(
       nowMs,
     });
     const spans = buildSpans({
-      run, stepRuns, transitions, interventions, nowMs,
+      run, stepRuns, transitions, interventions, nowMs, phaseEvents, runEvents,
       stepNames: stepNamesForRun(db, run.runId, run.templateId),
     });
     return buildRunSummary({
-      run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs,
+      run, stepRuns, transitions, interventions, spans, activityEvents, runEvents, nowMs, fromMs, phaseEvents,
       humanParks: openHumanParks(db, run, interventions, nowMs),
     });
   });
@@ -133,6 +135,7 @@ export function getRunDetail(
     transitions: listTransitionsByRun(db, runId),
     events: listActivityEventsByGoal(db, run.goalId),
     runEvents: listRunEventsByGoal(db, run.goalId),
+    phaseEvents: listStepPhaseEventsByGoal(db, run.goalId),
     sourceKinds: activitySourceKinds(db, run.goalId),
     stepNames: stepNamesForRun(db, runId, run.templateId),
     nowMs: Date.parse(opts.nowIso ?? new Date().toISOString()),

@@ -42,6 +42,8 @@ const operationalDark: ThemeDefinition = {
 
     "--run": "#22C55E",
     "--run-soft": "rgba(34,197,94,0.16)",
+    // A second worker hue: the agent's turn beyond model inference (tools, hooks).
+    "--run-2": "#14B8A6",
     "--warn": "#F59E0B",
     "--warn-soft": "rgba(245,158,11,0.16)",
     "--err": "#EF4444",

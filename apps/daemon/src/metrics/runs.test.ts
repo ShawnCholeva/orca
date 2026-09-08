@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { HarnessTransition, Intervention } from "@orca/contracts";
 import {
   buildInterventions, buildRunDetail, clampIntervals, computeAwaitingYou, computeCost,
-  computeDurations, computeProgress, mergeIntervals, runTerminalMs, totalMs,
+  computeDurations, computeProgress, computeStopCompliance, mergeIntervals, runTerminalMs,
+  subtractIntervals, totalMs,
 } from "./runs.js";
-import type { ActivityEvent, RunRow, RunStepRunRow, RunTransition } from "./runs-fetch.js";
+import type { ActivityEvent, RunEvent, RunRow, RunStepRunRow, RunTransition, StepPhaseEvent } from "./runs-fetch.js";
 
 const RUN_ID = "run-1";
 const GOAL_ID = "goal-1";
@@ -24,7 +25,8 @@ function stepRun(over: Partial<RunStepRunRow> = {}): RunStepRunRow {
   return {
     stepRunId: "sr-1", goalId: GOAL_ID, stepTemplateId: "triage", ordinal: 0,
     attempt: 1, status: "passed", startedAt: "2026-09-01T00:00:00.000Z",
-    finishedAt: "2026-09-01T00:30:00.000Z", blockedReason: null, stallRescues: 0, ...over,
+    finishedAt: "2026-09-01T00:30:00.000Z", blockedReason: null, stallRescues: 0,
+    reviseAttempts: 0, ...over,
   };
 }
 
@@ -77,6 +79,26 @@ function markDone(usd: number): RunTransition {
 function ev(activityId: string, status: string, at: string, stepRunId = "sr-1", sourceKind: string | null = null): ActivityEvent {
   return { createdAt: at, activityId, workflowRunId: RUN_ID, stepRunId, status, sourceKind };
 }
+
+function runEv(type: string, at: string, workflowRunId = RUN_ID, stepRunId: string | null = null): RunEvent {
+  return { createdAt: at, type, workflowRunId, stepRunId };
+}
+
+function phase(phase: string | null, at: string, stepRunId = "sr-1", workflowRunId = RUN_ID): StepPhaseEvent {
+  return { createdAt: at, workflowRunId, stepRunId, phase };
+}
+
+describe("subtractIntervals", () => {
+  it("keeps only the parts of a that no interval of b covers", () => {
+    expect(subtractIntervals([{ start: 0, end: 100 }], [{ start: 10, end: 20 }, { start: 15, end: 30 }, { start: 90, end: 200 }]))
+      .toEqual([{ start: 0, end: 10 }, { start: 30, end: 90 }]);
+  });
+
+  it("returns a untouched when b misses it, and nothing when b swallows it", () => {
+    expect(subtractIntervals([{ start: 0, end: 10 }], [{ start: 20, end: 30 }])).toEqual([{ start: 0, end: 10 }]);
+    expect(subtractIntervals([{ start: 5, end: 10 }], [{ start: 0, end: 30 }])).toEqual([]);
+  });
+});
 
 describe("mergeIntervals", () => {
   it("merges overlapping and touching intervals and drops empties", () => {
@@ -251,10 +273,268 @@ describe("computeDurations", () => {
     expect(d.integrityFlag).toContain("do not reconcile");
   });
 
+  it("names the time a blocked run sat until someone restarted it", () => {
+    // Live: run 01a07568 blocked at 07:16 on a crashed worker and was restarted at
+    // 07:23. Nothing was parked — the card had expired — so those seven minutes
+    // read as unaccounted, when the record says exactly what they were.
+    const d = computeDurations({
+      ...base,
+      transitions: [],
+      interventions: [],
+      runEvents: [
+        runEv("workflow.run.started", "2026-09-01T00:00:00.000Z"),
+        runEv("workflow.run.blocked", "2026-09-01T00:30:00.000Z"),
+        runEv("workflow.run.started", "2026-09-01T00:40:00.000Z"),
+      ],
+    });
+    expect(d.haltedMs).toBe(10 * 60_000);
+    expect(d.unaccountedMs).toBe(50 * 60_000);
+    expect(d.workingMs + d.parkedMs + d.haltedMs + d.reviewingMs + d.unaccountedMs).toBe(d.elapsedMs);
+  });
+
+  it("gives a block that was never resumed no halted time — the run ended there", () => {
+    // A still-blocked run's terminal moment IS the block (§2.1), so the interval is
+    // empty and the age of its abandoned cards stays off the clock.
+    const d = computeDurations({
+      ...base,
+      run: run({ status: "blocked", finishedAt: null }),
+      stepRuns: [stepRun({ finishedAt: "2026-09-01T00:30:00.000Z" })],
+      transitions: [],
+      interventions: [],
+      runEvents: [runEv("workflow.run.blocked", "2026-09-01T00:30:00.000Z")],
+    });
+    expect(d.elapsedMs).toBe(30 * 60_000);
+    expect(d.haltedMs).toBe(0);
+  });
+
+  it("counts a run the operator stopped as halted, not unaccounted", () => {
+    // A stop is the same standstill as a block — the run is not working and no
+    // park explains it. Left out of the halted term, every minute of it landed in
+    // `unaccounted`, the bucket reserved for time we genuinely cannot explain.
+    const d = computeDurations({
+      ...base, transitions: [], interventions: [],
+      runEvents: [
+        runEv("workflow.run.paused", "2026-09-01T00:10:00.000Z"),
+        runEv("workflow.run.started", "2026-09-01T00:40:00.000Z"),
+      ],
+    });
+    expect(d.haltedMs).toBe(30 * 60_000);
+  });
+
+  it("ignores another run's blocks", () => {
+    const d = computeDurations({
+      ...base, transitions: [], interventions: [],
+      runEvents: [runEv("workflow.run.blocked", "2026-09-01T00:30:00.000Z", "other"), runEv("workflow.run.started", "2026-09-01T00:40:00.000Z", "other")],
+    });
+    expect(d.haltedMs).toBe(0);
+  });
+
+  it("names the orchestrator's judge and independent-check turns as reviewing", () => {
+    const d = computeDurations({
+      ...base,
+      transitions: [],
+      interventions: [],
+      phaseEvents: [
+        phase("reviewing", "2026-09-01T00:10:00.000Z"),
+        phase("independent_check", "2026-09-01T00:12:00.000Z"),
+        phase(null, "2026-09-01T00:15:00.000Z"),
+      ],
+    });
+    expect(d.reviewingMs).toBe(5 * 60_000);
+    expect(d.unaccountedMs).toBe(55 * 60_000);
+    expect(d.integrityFlag).toBeNull();
+  });
+
+  it("clips a phase a restart left open to its step run's own bracket", () => {
+    // The phase is live-only state that boot reconciliation clears without an
+    // event. Left to run to the end of the run it would claim 40 minutes of judging
+    // for a step that finished 10 minutes after the phase began.
+    const d = computeDurations({
+      ...base,
+      transitions: [],
+      interventions: [],
+      phaseEvents: [phase("reviewing", "2026-09-01T00:20:00.000Z")],
+    });
+    expect(d.reviewingMs).toBe(10 * 60_000);
+  });
+
+  it("keeps the placed terms disjoint — a park wins over a halt, and a halt over reviewing", () => {
+    const d = computeDurations({
+      ...base,
+      stepRuns: [stepRun({ finishedAt: "2026-09-01T01:00:00.000Z" })],
+      transitions: [],
+      interventions: buildInterventions({
+        events: [
+          ev("a1", "paused_for_input", "2026-09-01T00:30:00.000Z"),
+          ev("a1", "active", "2026-09-01T00:50:00.000Z"),
+        ],
+        sourceKinds: new Map(), run: base.run, nowMs: NOW,
+      }),
+      runEvents: [
+        runEv("workflow.run.blocked", "2026-09-01T00:40:00.000Z"),
+        runEv("workflow.run.started", "2026-09-01T00:55:00.000Z"),
+      ],
+      phaseEvents: [phase("reviewing", "2026-09-01T00:25:00.000Z"), phase(null, "2026-09-01T00:45:00.000Z")],
+    });
+    expect(d.parkedMs).toBe(20 * 60_000);    // [00:30, 00:50]
+    expect(d.haltedMs).toBe(5 * 60_000);     // [00:40, 00:55] less the park
+    expect(d.reviewingMs).toBe(5 * 60_000);  // [00:25, 00:45] less the park
+    expect(d.unaccountedMs).toBe(30 * 60_000);
+    expect(d.workingMs + d.parkedMs + d.haltedMs + d.reviewingMs + d.unaccountedMs).toBe(d.elapsedMs);
+    expect(d.integrityFlag).toBeNull();
+  });
+
+  it("counts the orchestrator's unphased turns as reviewing, from the mediator's turn brackets", () => {
+    // The next-decision and user-message turns never set a phase. On the live run
+    // one such turn was lost to a daemon restart and re-issued 7.5 minutes later;
+    // the run was the orchestrator's for all of it.
+    const d = computeDurations({
+      ...base,
+      stepRuns: [stepRun({ finishedAt: "2026-09-01T01:00:00.000Z" })],
+      transitions: [],
+      interventions: [],
+      runEvents: [
+        // A turn that finished normally.
+        runEv("workflow.orchestrator.turn_started", "2026-09-01T00:10:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.orchestrator.turn_finished", "2026-09-01T00:12:00.000Z", RUN_ID, "sr-1"),
+        // A turn that never finished, replaced by the next one.
+        runEv("workflow.orchestrator.turn_started", "2026-09-01T00:20:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.orchestrator.turn_started", "2026-09-01T00:27:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.orchestrator.turn_finished", "2026-09-01T00:28:00.000Z", RUN_ID, "sr-1"),
+      ],
+      // A phase overlapping the first turn is unioned, not double-counted.
+      phaseEvents: [phase("reviewing", "2026-09-01T00:11:00.000Z"), phase(null, "2026-09-01T00:13:00.000Z")],
+    });
+    expect(d.reviewingMs).toBe(11 * 60_000); // [00:10,00:13] + [00:20,00:28]
+    expect(d.unaccountedMs).toBe(49 * 60_000);
+  });
+
+  it("places the worker's turns and names the part that was not model time", () => {
+    const d = computeDurations({
+      ...base,
+      stepRuns: [stepRun({ finishedAt: "2026-09-01T01:00:00.000Z" })],
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:30:00.000Z", latencyMs: 8 * 60_000 })],
+      interventions: [],
+      runEvents: [
+        runEv("workflow.worker.prompted", "2026-09-01T00:05:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.worker.responded", "2026-09-01T00:25:00.000Z", RUN_ID, "sr-1"),
+      ],
+      // The judge runs after the Stop; adjacent, not overlapping.
+      phaseEvents: [phase("reviewing", "2026-09-01T00:25:00.000Z"), phase(null, "2026-09-01T00:27:00.000Z")],
+    });
+    expect(d.workingMs).toBe(8 * 60_000);
+    expect(d.agentMs).toBe(12 * 60_000);      // a 20m turn, 8m of it inference
+    expect(d.reviewingMs).toBe(2 * 60_000);
+    expect(d.unaccountedMs).toBe(38 * 60_000);
+    expect(d.workingMs + d.agentMs + d.parkedMs + d.haltedMs + d.reviewingMs + d.unaccountedMs).toBe(d.elapsedMs);
+    expect(d.integrityFlag).toBeNull();
+  });
+
+  it("gives a run recorded before turn brackets existed no agent time, and reads as before", () => {
+    const d = computeDurations({
+      ...base,
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", latencyMs: 10 * 60_000 })],
+      interventions: [],
+    });
+    expect(d.agentMs).toBe(0);
+    expect(d.workingMs).toBe(10 * 60_000);
+    expect(d.unaccountedMs).toBe(50 * 60_000);
+  });
+
+  it("does not let a worker turn overlap a park inside it — the park wins", () => {
+    const d = computeDurations({
+      ...base,
+      stepRuns: [stepRun({ finishedAt: "2026-09-01T01:00:00.000Z" })],
+      transitions: [],
+      interventions: buildInterventions({
+        events: [ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z"), ev("a1", "active", "2026-09-01T00:20:00.000Z")],
+        sourceKinds: new Map(), run: base.run, nowMs: NOW,
+      }),
+      runEvents: [
+        runEv("workflow.worker.prompted", "2026-09-01T00:05:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.worker.responded", "2026-09-01T00:25:00.000Z", RUN_ID, "sr-1"),
+      ],
+    });
+    expect(d.parkedMs).toBe(10 * 60_000);
+    expect(d.agentMs).toBe(10 * 60_000);
+  });
+
+  it("clips the halted and reviewing terms to a window like the others", () => {
+    const d = computeDurations({
+      ...base,
+      stepRuns: [stepRun({ finishedAt: "2026-09-01T01:00:00.000Z" })],
+      transitions: [],
+      interventions: [],
+      runEvents: [runEv("workflow.run.blocked", "2026-09-01T00:10:00.000Z"), runEv("workflow.run.started", "2026-09-01T00:40:00.000Z")],
+      phaseEvents: [phase("reviewing", "2026-09-01T00:45:00.000Z"), phase(null, "2026-09-01T00:55:00.000Z")],
+      fromMs: Date.parse("2026-09-01T00:30:00.000Z"),
+    });
+    expect(d.elapsedMs).toBe(30 * 60_000);
+    expect(d.haltedMs).toBe(10 * 60_000);
+    expect(d.reviewingMs).toBe(10 * 60_000);
+    expect(d.unaccountedMs).toBe(10 * 60_000);
+  });
+
   it("marks a live run accruing and a dead one not", () => {
     const t = { transitions: [], interventions: [] };
     expect(computeDurations({ ...base, ...t }).accruing).toBe(false);
     expect(computeDurations({ ...base, ...t, run: run({ status: "active" }) }).accruing).toBe(true);
+  });
+
+  it("clips every term to a window that opens inside the run", () => {
+    // The Workflows page summed the LIFETIME of two runs that began three days
+    // before its 8-hour window: 179h of wall clock against 8h. With a window
+    // start, each term is the part that happened at or after it.
+    const d = computeDurations({
+      ...base,
+      transitions: [
+        // Model time that all lies before the window: none of it counts.
+        complete({ id: "c1", at: "2026-09-01T00:25:00.000Z", latencyMs: 10 * 60_000 }),
+        // Model time that all lies inside it: counts in full.
+        complete({ id: "c2", at: "2026-09-01T00:45:00.000Z", latencyMs: 8 * 60_000 }),
+      ],
+      interventions: buildInterventions({
+        events: [
+          ev("a1", "paused_for_input", "2026-09-01T00:10:00.000Z"),
+          ev("a1", "active", "2026-09-01T00:32:00.000Z"),
+          ev("a2", "paused_for_input", "2026-09-01T00:48:00.000Z", "sr-2"),
+          ev("a2", "active", "2026-09-01T00:58:00.000Z", "sr-2"),
+        ],
+        sourceKinds: new Map(), run: base.run, nowMs: NOW,
+      }),
+      fromMs: Date.parse("2026-09-01T00:30:00.000Z"),
+    });
+    expect(d.elapsedMs).toBe(30 * 60_000);   // 00:30 → 01:00, not 00:00 → 01:00
+    expect(d.parkedMs).toBe(12 * 60_000);    // [00:30,00:32] + [00:48,00:58]
+    expect(d.workingMs).toBe(8 * 60_000);
+    expect(d.unaccountedMs).toBe(10 * 60_000);
+    expect(d.integrityFlag).toBeNull();
+  });
+
+  it("places a completion's model time ending at the completion and keeps the part after the window opened", () => {
+    // Working time is a magnitude, not a placed interval, so a window cannot cut
+    // it exactly. The bound it does have: the model time ended when the step
+    // completed. Placed there, only the part after the window start counts —
+    // counting all of it would put 8m of work inside 4m of wall clock.
+    const d = computeDurations({
+      ...base,
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:34:00.000Z", latencyMs: 8 * 60_000 })],
+      interventions: [],
+      fromMs: Date.parse("2026-09-01T00:30:00.000Z"),
+    });
+    expect(d.workingMs).toBe(4 * 60_000);
+    expect(d.elapsedMs).toBe(30 * 60_000);
+    expect(d.integrityFlag).toBeNull();
+  });
+
+  it("reads zero for a window that opened after the run ended", () => {
+    const d = computeDurations({
+      ...base,
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", latencyMs: 10 * 60_000 })],
+      interventions: [],
+      fromMs: Date.parse("2026-09-01T02:00:00.000Z"),
+    });
+    expect(d).toMatchObject({ elapsedMs: 0, workingMs: 0, parkedMs: 0, unaccountedMs: 0, integrityFlag: null });
   });
 });
 
@@ -339,6 +619,59 @@ describe("computeCost", () => {
 });
 
 describe("buildRunDetail", () => {
+  it("clips reviewing into the span it happened in, under the same precedence as the run", () => {
+    const detail = buildRunDetail({
+      run: run(),
+      stepRuns: [
+        stepRun({ stepRunId: "sr-1", finishedAt: "2026-09-01T00:30:00.000Z" }),
+        stepRun({ stepRunId: "sr-2", stepTemplateId: "execution", ordinal: 1, startedAt: "2026-09-01T00:30:00.000Z", finishedAt: "2026-09-01T01:00:00.000Z" }),
+      ],
+      transitions: [],
+      events: [
+        ev("a1", "paused_for_input", "2026-09-01T00:40:00.000Z", "sr-2"),
+        ev("a1", "active", "2026-09-01T00:50:00.000Z", "sr-2"),
+      ],
+      runEvents: [],
+      phaseEvents: [
+        phase("reviewing", "2026-09-01T00:20:00.000Z", "sr-1"), phase(null, "2026-09-01T00:25:00.000Z", "sr-1"),
+        phase("reviewing", "2026-09-01T00:35:00.000Z", "sr-2"), phase(null, "2026-09-01T00:45:00.000Z", "sr-2"),
+      ],
+      sourceKinds: new Map(),
+      stepNames: new Map(),
+      nowMs: NOW,
+    });
+    expect(detail.spans.map((s) => s.reviewingMs)).toEqual([5 * 60_000, 5 * 60_000]);
+    expect(detail.spans.map((s) => s.turnMs)).toEqual([0, 0]);
+    expect(detail.spans[1].parkedMs).toBe(10 * 60_000);
+    expect(detail.run.durations.reviewingMs).toBe(10 * 60_000);
+    // A span with no bracket has no reviewing figure either, not a zero.
+    const open = buildRunDetail({
+      run: run({ status: "active", finishedAt: null }), stepRuns: [stepRun({ finishedAt: null, status: "active" })],
+      transitions: [], events: [], runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(open.spans[0].reviewingMs).toBeNull();
+    expect(open.spans[0].turnMs).toBeNull();
+  });
+
+  it("clips a worker turn into its span, outside that span's orchestrator turns", () => {
+    const detail = buildRunDetail({
+      run: run(),
+      stepRuns: [stepRun({ stepRunId: "sr-1", finishedAt: "2026-09-01T00:30:00.000Z" })],
+      transitions: [complete({ id: "c1", at: "2026-09-01T00:20:00.000Z", latencyMs: 4 * 60_000 })],
+      events: [],
+      runEvents: [
+        runEv("workflow.worker.prompted", "2026-09-01T00:02:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.worker.responded", "2026-09-01T00:20:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.orchestrator.turn_started", "2026-09-01T00:20:00.000Z", RUN_ID, "sr-1"),
+        runEv("workflow.orchestrator.turn_finished", "2026-09-01T00:22:00.000Z", RUN_ID, "sr-1"),
+      ],
+      sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
+    });
+    expect(detail.spans[0].turnMs).toBe(18 * 60_000);
+    expect(detail.spans[0].reviewingMs).toBe(2 * 60_000);
+    expect(detail.run.durations.agentMs).toBe(14 * 60_000);
+  });
+
   it("builds spans with restart counts and an unknown cost state for an unreported span", () => {
     const detail = buildRunDetail({
       run: run(),
@@ -622,7 +955,7 @@ describe("computeProgress", () => {
   it("moves signal ahead of progress when only a run event fired — the spinning case", () => {
     const p = computeProgress({
       ...base,
-      runEvents: [{ createdAt: "2026-09-01T00:55:00.000Z", type: "workflow.step.phase_changed", workflowRunId: RUN_ID }],
+      runEvents: [{ createdAt: "2026-09-01T00:55:00.000Z", type: "workflow.step.phase_changed", workflowRunId: RUN_ID, stepRunId: null }],
     });
     expect(p.lastSignalAt).toBe("2026-09-01T00:55:00.000Z");
     expect(p.lastSignalChannel).toBe("run_event");
@@ -634,7 +967,7 @@ describe("computeProgress", () => {
     // register as this run's signal.
     const p = computeProgress({
       ...base,
-      runEvents: [{ createdAt: "2026-09-01T00:55:00.000Z", type: "workflow.step.started", workflowRunId: "other-run" }],
+      runEvents: [{ createdAt: "2026-09-01T00:55:00.000Z", type: "workflow.step.started", workflowRunId: "other-run", stepRunId: null }],
     });
     expect(p.lastSignalAt).toBe("2026-09-01T00:30:00.000Z");
   });
@@ -642,7 +975,7 @@ describe("computeProgress", () => {
   it("clips both clocks to the run's own window", () => {
     const p = computeProgress({
       ...base,
-      runEvents: [{ createdAt: "2026-09-02T00:00:00.000Z", type: "activity.changed", workflowRunId: RUN_ID }],
+      runEvents: [{ createdAt: "2026-09-02T00:00:00.000Z", type: "activity.changed", workflowRunId: RUN_ID, stepRunId: null }],
     });
     // The event is a day after the run ended; the run was not still moving.
     expect(p.lastSignalAt).toBe("2026-09-01T00:30:00.000Z");
@@ -834,5 +1167,90 @@ describe("span parked time", () => {
       runEvents: [], sourceKinds: new Map(), stepNames: new Map(), nowMs: NOW,
     });
     expect(detail.spans[0].parkedMs).toBe(10 * 60_000);
+  });
+});
+
+
+describe("computeStopCompliance", () => {
+  it("does not answer a question that was never asked", () => {
+    // Null, never true. "No stop was requested" and "the stop was obeyed" are
+    // different facts; collapsing them would report perfect compliance for a
+    // harness that had never once been tested on it.
+    const c = computeStopCompliance([runEv("workflow.run.started", "2026-09-01T00:00:00.000Z")], RUN_ID);
+    expect(c.requested).toBe(0);
+    expect(c.honored).toBeNull();
+  });
+
+  it("is honored when nothing starts work after the request", () => {
+    const c = computeStopCompliance(
+      [
+        runEv("workflow.worker.prompted", "2026-09-01T00:00:00.000Z"),
+        runEv("workflow.run.stop_requested", "2026-09-01T00:10:00.000Z"),
+        runEv("workflow.run.paused", "2026-09-01T00:10:01.000Z"),
+      ],
+      RUN_ID
+    );
+    expect(c).toMatchObject({ requested: 1, honored: true, violationEvidence: null });
+    expect(c.lastRequestedAt).toBe("2026-09-01T00:10:00.000Z");
+  });
+
+  it("is violated when the harness starts work anyway, and says what did", () => {
+    // The live failure: "stop" was acknowledged, then the watchdog restarted the
+    // step three times and blocked the run. Nothing recorded that a stop had ever
+    // been asked for, so this was unanswerable.
+    const c = computeStopCompliance(
+      [
+        runEv("workflow.run.stop_requested", "2026-09-01T00:10:00.000Z"),
+        runEv("workflow.step.started", "2026-09-01T00:20:00.000Z"),
+      ],
+      RUN_ID
+    );
+    expect(c.honored).toBe(false);
+    expect(c.violationEvidence).toBe("workflow.step.started");
+  });
+
+  it("closes the window at a resume — work the operator asked for is not a violation", () => {
+    const c = computeStopCompliance(
+      [
+        runEv("workflow.run.stop_requested", "2026-09-01T00:10:00.000Z"),
+        runEv("workflow.run.started", "2026-09-01T00:30:00.000Z"),
+        runEv("workflow.worker.prompted", "2026-09-01T00:31:00.000Z"),
+      ],
+      RUN_ID
+    );
+    expect(c.honored).toBe(true);
+  });
+
+  it("does not count an in-flight turn LANDING as starting work", () => {
+    const c = computeStopCompliance(
+      [
+        runEv("workflow.run.stop_requested", "2026-09-01T00:10:00.000Z"),
+        runEv("workflow.worker.responded", "2026-09-01T00:10:30.000Z"),
+        runEv("workflow.step.completed", "2026-09-01T00:10:40.000Z"),
+      ],
+      RUN_ID
+    );
+    expect(c.honored).toBe(true);
+  });
+
+  it("judges from the LAST request when the operator asked twice", () => {
+    const c = computeStopCompliance(
+      [
+        runEv("workflow.run.stop_requested", "2026-09-01T00:10:00.000Z"),
+        runEv("workflow.step.started", "2026-09-01T00:15:00.000Z"),
+        runEv("workflow.run.stop_requested", "2026-09-01T00:20:00.000Z"),
+      ],
+      RUN_ID
+    );
+    expect(c.requested).toBe(2);
+    expect(c.honored).toBe(true);
+  });
+
+  it("ignores another run's stop", () => {
+    const c = computeStopCompliance(
+      [runEv("workflow.run.stop_requested", "2026-09-01T00:10:00.000Z", "other")],
+      RUN_ID
+    );
+    expect(c.honored).toBeNull();
   });
 });

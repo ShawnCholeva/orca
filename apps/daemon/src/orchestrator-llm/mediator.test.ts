@@ -21,6 +21,24 @@ describe("OrchestratorMediator.invoke", () => {
     expect(action.kind).toBe("approve_step_complete");
   });
 
+  it("brackets every invocation with a turn started and finished, even when it throws", async () => {
+    const turns = { started: vi.fn(), finished: vi.fn() };
+    const mediator = new OrchestratorMediator({
+      llm: { request: vi.fn(async () => ({ text: "not-json" })) } as any,
+      buildContext: vi.fn(() => ({} as any)),
+      composePrompt: vi.fn(() => ({ systemPrompt: "s", userPrompt: "u" })),
+      turns,
+    });
+    const input = {
+      triggerKind: "user_message" as const, goalId: "g1", runId: "r1", stepRunId: "s1",
+      triggerPayload: { userMessage: "hi" }, adapterId: "claude-code", modelId: "m",
+    };
+    await expect(mediator.invoke(input)).rejects.toThrow();
+    const scope = { goalId: "g1", runId: "r1", stepRunId: "s1", triggerKind: "user_message" };
+    expect(turns.started).toHaveBeenCalledWith(scope);
+    expect(turns.finished).toHaveBeenCalledWith(scope);
+  });
+
   it("retries once on parse failure", async () => {
     const fakeLlm = {
       request: vi.fn()

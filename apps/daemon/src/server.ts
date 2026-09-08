@@ -92,6 +92,7 @@ import {
   ValidationError
 } from './goals.js';
 import { eventBus, listEventsSince, type EventBus } from './events.js';
+import { appendWorkflowEvent } from './workflows/events.js';
 import { getGoalRefinement } from './goal-refinements.js';
 import { inspectWorkspace } from './workspaces/inspect.js';
 import { WorkspaceInspectionError } from './workspaces/errors.js';
@@ -324,6 +325,21 @@ const pkg = { version: readPackageVersion() };
 export function parseStallMs(raw: string | undefined): number {
   const parsed = Number(raw ?? 600000);
   return Number.isFinite(parsed) ? parsed : 600000;
+}
+
+/**
+ * The stall budget for a worker sitting inside an unfinished tool call, from
+ * ORCA_TOOL_STALL_MS, defaulting to 4x the ordinary budget.
+ *
+ * Four times rather than a flat number so the two stay in proportion when the
+ * ordinary budget is tuned. The asymmetry is deliberate: reaping a healthy agent
+ * mid-build destroys real work AND spends a rescue from a budget that ends in a
+ * blocked run, while waiting too long on a tool that never returns costs only
+ * latency before a human is told. Same NaN guard, for the same reason.
+ */
+export function parseToolStallMs(raw: string | undefined, stallMs: number): number {
+  const parsed = Number(raw ?? stallMs * 4);
+  return Number.isFinite(parsed) ? parsed : stallMs * 4;
 }
 
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -794,11 +810,34 @@ export function createServer(
   });
   const providerClient = new ModelProviderOrchestratorLlmClient(daemonContext.modelProviderRegistry);
   const routedOrchestratorClient = new RoutedOrchestratorLlmClient(shadowClient, providerClient);
+  // Turn brackets for the run-trace projection: the orchestrator's and the workers'
+  // wall clock as placed intervals, so it stops reading as "unaccounted". Best
+  // effort — a failure to write the record must never fail the turn it describes.
+  const recordTurnEvent = (
+    type: "workflow.orchestrator.turn_started" | "workflow.orchestrator.turn_finished" | "workflow.worker.prompted" | "workflow.worker.responded",
+    payload: Record<string, unknown>
+  ) => {
+    try {
+      eventBus.publish(appendWorkflowEvent(db, type, payload, daemonContext.now(), daemonContext.idFactory));
+    } catch (err) {
+      console.warn(`[metrics] could not record ${type}:`, err instanceof Error ? err.message : err);
+    }
+  };
+  const recordWorkerTurn = (type: "workflow.worker.prompted" | "workflow.worker.responded", sessionId: string) => {
+    const ctx = resolveStepContext(sessionId);
+    if (!ctx) return;
+    recordTurnEvent(type, { goalId: ctx.goalId, workflowRunId: ctx.workflowRunId, stepRunId: ctx.stepRunId, sessionId });
+  };
+
   const orchestratorMediator = new OrchestratorMediator({
     llm: routedOrchestratorClient,
     buildContext: ({ goalId, runId, stepRunId }) =>
       buildContextFromDb(db, { goalId, runId, stepRunId, payloadBudgetBytes: 64 * 1024 }),
     composePrompt: composeOrchestratorPrompt,
+    turns: {
+      started: (s) => recordTurnEvent("workflow.orchestrator.turn_started", { goalId: s.goalId, workflowRunId: s.runId, stepRunId: s.stepRunId, triggerKind: s.triggerKind }),
+      finished: (s) => recordTurnEvent("workflow.orchestrator.turn_finished", { goalId: s.goalId, workflowRunId: s.runId, stepRunId: s.stepRunId, triggerKind: s.triggerKind }),
+    },
   });
 
   const workerSpawnFn = async ({ sessionId, goalId, adapterId }: { sessionId: string; goalId: string; adapterId: string }) => {
@@ -811,7 +850,15 @@ export function createServer(
     const sandboxed = noopSandbox.wrap(spawn);
     await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, env: sandboxed.env });
   };
-  const workerDeliverFn = deps?.workerDeliver ?? ((sessionId: string, text: string) => workerSessions.deliver(sessionId, text));
+  const baseWorkerDeliver = deps?.workerDeliver ?? ((sessionId: string, text: string) => workerSessions.deliver(sessionId, text));
+  // Every prompt a worker receives — the objective, a forward, a revision, recovery
+  // guidance — lands through here, so this is where a worker turn begins. Recorded
+  // only once the paste actually landed; the idle wait before it is not the turn.
+  const workerDeliverFn = async (sessionId: string, text: string) => {
+    const r = await baseWorkerDeliver(sessionId, text);
+    if (r === "delivered") recordWorkerTurn("workflow.worker.prompted", sessionId);
+    return r;
+  };
   const workerWaitFn = (sessionId: string, adapterId: string) => workerSessions.waitForProviderReset(sessionId, adapterId);
 
   const dispatchEngine = new DispatchEngine(
@@ -1095,12 +1142,14 @@ export function createServer(
     const watchdogMs = Number(process.env["ORCA_LIVENESS_WATCHDOG_MS"] ?? 5000);
     const watchdogGraceMs = Number(process.env["ORCA_LIVENESS_GRACE_MS"] ?? 15000);
     const stallMs = parseStallMs(process.env["ORCA_STALL_MS"]);
+    const toolStallMs = parseToolStallMs(process.env["ORCA_TOOL_STALL_MS"], stallMs);
     const watchdogProgress = new Map<string, ProgressMark>();
     const watchdogDeps = buildLivenessWatchdogDeps(db, eventBus, {
       isTmuxAlive: (sessionId) => workerSessions.isTmuxAlive(sessionId),
       now: daemonContext.now ?? (() => new Date().toISOString()),
       graceMs: watchdogGraceMs,
       stallMs,
+      toolStallMs,
       progress: watchdogProgress,
     });
     const watchdogTimer = setInterval(() => {
@@ -1824,6 +1873,9 @@ export function createServer(
   registerAgentHookRoutes(server, {
     onResponseDone: async (payload) => {
       const stepContext = resolveStepContext(payload.sessionId);
+      // The Stop hook is the end of the worker's turn whatever the orchestrator
+      // makes of it next, so it is written down before anything is decided.
+      if (stepContext) recordWorkerTurn("workflow.worker.responded", payload.sessionId);
       try {
         await orchestratorService.onAgentResponseDone(db, daemonContext.now, payload, {
           bus: eventBus,
@@ -2525,6 +2577,7 @@ export function createServer(
     bus: eventBus,
     now: daemonContext.now,
     idFactory: daemonContext.idFactory,
+    workerTerminate: (sessionId) => workerSessions.terminate(sessionId, "user stopped the run"),
   });
 
   // ---- Orchestrator hook endpoint ----

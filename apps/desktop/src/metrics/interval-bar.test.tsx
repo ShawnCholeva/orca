@@ -64,6 +64,49 @@ describe("IntervalBar", () => {
     expect(text).toMatch(/1h 2m unaccounted/);
   });
 
+  it("paints blocked and reviewing as measured segments of their own and names them in text", () => {
+    const { container } = render(
+      <IntervalBar elapsedMs={10 * M} workingMs={2 * M} parkedMs={3 * M} haltedMs={M} reviewingMs={M} unaccountedMs={3 * M} />
+    );
+    expect(container.querySelector('[data-seg="mismatch"]')).toBeNull();
+    expect(parseFloat((container.querySelector('[data-seg="halted"]') as HTMLElement).style.width)).toBeCloseTo(10, 1);
+    expect(parseFloat((container.querySelector('[data-seg="reviewing"]') as HTMLElement).style.width)).toBeCloseTo(10, 1);
+    const text = screen.getByRole("img").getAttribute("aria-label")!;
+    expect(text).toMatch(/1m 0s blocked/);
+    expect(text).toMatch(/1m 0s reviewing/);
+    expect(text).toMatch(/3m 0s unaccounted/);
+  });
+
+  it("paints the worker's turn beyond inference in the worker's second hue", () => {
+    const { container } = render(
+      <IntervalBar elapsedMs={10 * M} workingMs={2 * M} agentMs={3 * M} parkedMs={2 * M} unaccountedMs={3 * M} />
+    );
+    expect(container.querySelector('[data-seg="mismatch"]')).toBeNull();
+    const agent = container.querySelector('[data-seg="agent"]') as HTMLElement;
+    expect(parseFloat(agent.style.width)).toBeCloseTo(30, 1);
+    expect(agent.style.background).toContain("--run-2");
+    expect(screen.getByRole("img").getAttribute("aria-label")).toMatch(/3m 0s between model calls/);
+  });
+
+  it("names blocked and reviewing only when there was any", () => {
+    render(<IntervalBar {...run} haltedMs={0} reviewingMs={0} />);
+    const text = screen.getByRole("img").getAttribute("aria-label")!;
+    expect(text).not.toMatch(/blocked|reviewing/);
+  });
+
+  it("counts blocked and reviewing in the invariant", () => {
+    // Five terms must sum. Leaving the two new ones out of the check would let a
+    // bar that paints 12 minutes of a 10-minute span pass as tidy.
+    const { container: ok } = render(
+      <IntervalBar elapsedMs={10 * M} workingMs={2 * M} parkedMs={2 * M} haltedMs={2 * M} reviewingMs={2 * M} unaccountedMs={2 * M} />
+    );
+    expect(ok.querySelector('[data-seg="mismatch"]')).toBeNull();
+    const { container: bad } = render(
+      <IntervalBar elapsedMs={10 * M} workingMs={2 * M} parkedMs={2 * M} haltedMs={2 * M} reviewingMs={2 * M} unaccountedMs={4 * M} />
+    );
+    expect(bad.querySelector('[data-seg="mismatch"]')).toBeTruthy();
+  });
+
   it("renders an explicit absent interior rather than a zero-width bar", () => {
     // Worker gates emit no harness transitions at all. A zero-width bar would read
     // as "instant", which asserts a duration nobody measured.

@@ -77,3 +77,29 @@ describe("getTemplateMetricsDetail", () => {
     expect(fetchMock.mock.calls[0]![0]).toContain("/v1/metrics/templates/tpl?period=7d");
   });
 });
+
+describe("getRunSummaries", () => {
+  let api: ApiModule;
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(async () => {
+    vi.resetModules();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    api = await import("./api");
+  });
+
+  it("passes the window start through so the daemon clips durations to it", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    await api.getRunSummaries(50, "2026-09-06T14:00:00.000Z");
+    const url = String(fetchMock.mock.calls[0]![0]);
+    expect(url).toContain("/v1/metrics/runs?limit=50");
+    expect(url).toContain("from=2026-09-06T14%3A00%3A00.000Z");
+  });
+
+  it("asks for lifetimes when no window is given", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    await api.getRunSummaries();
+    expect(String(fetchMock.mock.calls[0]![0])).not.toContain("from=");
+  });
+});

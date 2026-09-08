@@ -375,31 +375,44 @@ export interface TimeBucket { startMs: number; endMs: number; count: number }
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
+export interface TimeSeries {
+  key: string;
+  label: string;
+  tone: string;
+  unit: { one: string; many: string };
+  buckets: TimeBucket[];
+}
+
 /**
- * Occurrences per interval across a window — a bar per bucket, a count per bar.
+ * Occurrences per interval across a window, one hue per series — a group of bars
+ * per bucket, a count per bar.
  *
- * Bars rather than a line because an empty bucket is a ZERO, an observation that
- * nothing happened, and a line would interpolate across it. The buckets are the
- * caller's (snapped to the reader's clock, see `bucketize`), so the first and last
- * may be partial; they are drawn to their true width inside the window rather than
- * padded out to look whole.
+ * Bars rather than lines because an empty bucket is a ZERO, an observation that
+ * nothing happened, and a line would interpolate across it. Grouped rather than
+ * stacked for the same reason the series are separate at all: they are different
+ * events with different remedies, so they sit side by side on one count axis and
+ * nothing invites the reader to add them. The buckets are the caller's (snapped to
+ * the reader's clock, see `bucketize`), and every series is expected to share them;
+ * the first and last may be partial and are drawn to their true width inside the
+ * window rather than padded out to look whole.
  *
  * The x-axis is the window exactly and the ticks fall on the bucket boundaries,
- * thinned to at most eight labels with the minor ticks kept. The y-axis is a count
- * with whole-number gridlines. A single hue: the panel title names the series, so
- * there is nothing for a legend to distinguish. Every bar carries hover text.
+ * thinned to at most four labels with the minor ticks kept. The y-axis is a count
+ * with whole-number gridlines, shared by every series. A legend under the chart
+ * carries each series' name and its total, so identity is never colour alone and a
+ * series that never fired still says so with a zero. Every bar carries hover text.
  */
 export function TimeBars({
-  buckets, fromMs, toMs, tone = "var(--err)", unit,
-}: { buckets: TimeBucket[]; fromMs: number; toMs: number; tone?: string; unit: { one: string; many: string } }) {
-  const total = buckets.reduce((a, b) => a + b.count, 0);
-  if (total === 0) {
-    return <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Nothing recorded in this window.</span>;
-  }
+  series, fromMs, toMs,
+}: { series: TimeSeries[]; fromMs: number; toMs: number }) {
+  const totals = series.map((s) => s.buckets.reduce((a, b) => a + b.count, 0));
+  const buckets = series[0]?.buckets ?? [];
+  // A half-width panel: the viewBox is drawn at roughly the size it renders at, so
+  // the 9px axis text lands near 9px on screen rather than being scaled to a squint.
   const width = 480, height = 150;
   const left = 28, right = 8, top = 10, bottom = 26;
   const x = scaleTime().domain([new Date(fromMs), new Date(toMs)]).range([left, width - right]);
-  const max = Math.max(...buckets.map((b) => b.count), 1);
+  const max = Math.max(...series.flatMap((s) => s.buckets.map((b) => b.count)), 1);
   const plotH = height - top - bottom;
   const y = (n: number) => top + plotH - (n / max) * plotH;
 
@@ -408,37 +421,65 @@ export function TimeBars({
   const gridlines: number[] = [];
   for (let n = stepY; n <= max; n += stepY) gridlines.push(n);
 
-  // A third-width panel fits four dated labels; six collided at the left edge.
+  // Four dated labels fit a half-width panel; six collided at the left edge.
   const axis = timeAxis(buckets, fromMs, 4);
   const stamp = timeFormat("%b %d %H:%M");
+  const grand = totals.reduce((a, n) => a + n, 0);
 
   return (
-    <div>
-      <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img"
-           aria-label={`${total} ${total === 1 ? unit.one : unit.many} across ${buckets.length} intervals`}
-           style={{ display: "block" }}>
-        {gridlines.map((n) => (
-          <g key={n}>
-            <line x1={left} x2={width - right} y1={y(n)} y2={y(n)} stroke="var(--hairline)" />
-            <text x={left - 6} y={y(n)} dy="0.35em" textAnchor="end" className="mono"
-                  style={{ fontSize: 9, fill: "var(--text-3)" }}>{n}</text>
-          </g>
+    <div style={{ display: "grid", gap: "var(--sp-2)" }}>
+      {grand === 0 ? (
+        <span style={{ fontSize: "var(--fs-2)", color: "var(--text-3)" }}>Nothing recorded in this window.</span>
+      ) : (
+        <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img"
+             aria-label={series.map((s, i) => `${totals[i]} ${totals[i] === 1 ? s.unit.one : s.unit.many}`).join(", ") + ` across ${buckets.length} intervals`}
+             style={{ display: "block" }}>
+          {gridlines.map((n) => (
+            <g key={n}>
+              <line x1={left} x2={width - right} y1={y(n)} y2={y(n)} stroke="var(--hairline)" />
+              <text x={left - 6} y={y(n)} dy="0.35em" textAnchor="end" className="mono"
+                    style={{ fontSize: 9, fill: "var(--text-3)" }}>{n}</text>
+            </g>
+          ))}
+          <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} stroke="var(--hairline-strong)" />
+          {buckets.map((slot, i) => {
+            // The bucket, clipped to the window, then split into one lane per series.
+            // A 2px gap to the neighbouring bucket and 2px between lanes, so no two
+            // bars ever fuse into one wide mark.
+            const x0 = x(new Date(Math.max(slot.startMs, fromMs))), x1 = x(new Date(Math.min(slot.endMs, toMs)));
+            const lane = Math.max(1, x1 - x0 - 2) / series.length;
+            return series.map((s, j) => {
+              const b = s.buckets[i];
+              if (b === undefined) return null;
+              const w = Math.max(1, lane - 2);
+              const h = b.count === 0 ? 0 : Math.max(2, y(0) - y(b.count));
+              return (
+                <rect key={`${s.key}-${slot.startMs}`} x={x0 + 1 + j * lane} y={y(0) - h} width={w} height={h} rx={h > 0 ? 2 : 0}
+                      fill={s.tone} data-bar="true" data-series={s.key} data-count={b.count}>
+                  <title>{`${stamp(new Date(b.startMs))} → ${stamp(new Date(b.endMs))}: ${b.count} ${b.count === 1 ? s.unit.one : s.unit.many}`}</title>
+                </rect>
+              );
+            });
+          })}
+          <TimeAxisTicks axis={axis} x={(t) => x(new Date(t))} baseline={y(0)} labelY={height - 8} left={left} right={width - right} />
+        </svg>
+      )}
+      {/* The legend names every series that COULD have fired, including the ones that
+          did not: a kind with no bars is a measured zero, and dropping its row would
+          leave the reader to guess whether it never happened or was never counted.
+          When nothing at all fired the sentence above already says so, and three
+          zeros underneath would only repeat it. */}
+      {grand > 0 && (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-4)", alignItems: "center" }}>
+        {series.map((s, i) => (
+          <span key={s.key} style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: s.tone, flexShrink: 0 }} />
+            <span style={{ fontSize: "var(--fs-2)", color: "var(--text-2)" }}>{s.label}</span>
+            <span className="mono" style={{ fontSize: "var(--fs-2)", fontWeight: 600, color: "var(--text)" }}>{totals[i]}</span>
+          </span>
         ))}
-        <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} stroke="var(--hairline-strong)" />
-        {buckets.map((b) => {
-          // Clipped to the window, and a 2px gap to the neighbour so bars never fuse.
-          const x0 = x(new Date(Math.max(b.startMs, fromMs))), x1 = x(new Date(Math.min(b.endMs, toMs)));
-          const w = Math.max(1, x1 - x0 - 2);
-          const h = b.count === 0 ? 0 : Math.max(2, y(0) - y(b.count));
-          return (
-            <rect key={b.startMs} x={x0 + 1} y={y(0) - h} width={w} height={h} rx={h > 0 ? 2 : 0}
-                  fill={tone} data-bar="true" data-count={b.count}>
-              <title>{`${stamp(new Date(b.startMs))} → ${stamp(new Date(b.endMs))}: ${b.count} ${b.count === 1 ? unit.one : unit.many}`}</title>
-            </rect>
-          );
-        })}
-        <TimeAxisTicks axis={axis} x={(t) => x(new Date(t))} baseline={y(0)} labelY={height - 8} left={left} right={width - right} />
-      </svg>
+      </div>
+      )}
     </div>
   );
 }
@@ -499,7 +540,8 @@ export function TimeLine({
   buckets, fromMs, toMs, tone = "var(--accent)", unit,
 }: { buckets: TimeBucket[]; fromMs: number; toMs: number; tone?: string; unit: { one: string; many: string } }) {
   const max = Math.max(...buckets.map((b) => b.count), 1);
-  const width = 960, height = 150;
+  // Half-width, like the errors chart beside it — see the note there on the viewBox.
+  const width = 480, height = 150;
   const left = 28, right = 8, top = 10, bottom = 26;
   const x = scaleTime().domain([new Date(fromMs), new Date(toMs)]).range([left, width - right]);
   const plotH = height - top - bottom;
@@ -507,7 +549,7 @@ export function TimeLine({
   const stepY = Math.max(1, Math.ceil(max / 4));
   const gridlines: number[] = [];
   for (let n = stepY; n <= max; n += stepY) gridlines.push(n);
-  const axis = timeAxis(buckets, fromMs);
+  const axis = timeAxis(buckets, fromMs, 4);
   const stamp = timeFormat("%b %d %H:%M");
   const px = (t: number) => x(new Date(Math.min(Math.max(t, fromMs), toMs)));
   const path = buckets.map((b, i) =>

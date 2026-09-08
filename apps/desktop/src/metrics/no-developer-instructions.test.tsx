@@ -40,7 +40,7 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
     status: "completed", startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T01:00:00.000Z",
     blockedReason: null, terminationCause: "infrastructure_killed",
     terminationEvidence: "crashed 3 times (worker_exited_no_signal)",
-    durations: { elapsedMs: H, workingMs: 600_000, parkedMs: 2_400_000, unaccountedMs: 600_000,
+    durations: { elapsedMs: H, workingMs: 600_000, parkedMs: 2_400_000, unaccountedMs: 600_000, agentMs: 0, haltedMs: 0, reviewingMs: 0,
                  spanActiveMs: 0, accruing: false, integrityFlag: null },
     cost: { usd: 0, wastedUsd: 0, failedUsd: 0, supersededUsd: 0,
             coverage: { reported: 0, total: 0, silent: 2 }, rollupCheck: "not_applicable" },
@@ -49,6 +49,7 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
     progress: { lastProgressAt: null, lastProgressChannel: null, lastSignalAt: null,
                 lastSignalChannel: null, silenceConclusive: true },
     awaitingYou: { count: 0, sinceMs: null, sourceKind: null },
+    stopCompliance: { requested: 0, lastRequestedAt: null, honored: null, violationEvidence: null },
     ...over,
   };
 }
@@ -58,8 +59,8 @@ function span(over: Partial<RunTraceSpan> = {}): RunTraceSpan {
     workflowRunId: "r1", workflowStepRunId: "sr1", goalId: "g1", stepTemplateId: "critique",
     name: "Critique", ordinal: 0, attempt: 1, kind: "gate",
     startedAt: "2026-09-01T00:00:00.000Z", finishedAt: "2026-09-01T00:02:00.000Z",
-    elapsedMs: 120_000, workingMs: null, parkedMs: 0, status: "passed", blockedReason: null,
-    restarts: 0, completions: 1, stallRescues: 0, cost: null, tier: null,
+    elapsedMs: 120_000, workingMs: null, parkedMs: 0, reviewingMs: 0, turnMs: 0, status: "passed", blockedReason: null,
+    restarts: 0, completions: 1, stallRescues: 0, reviseAttempts: 0, reviseCapped: false, cost: null, tier: null,
     verifiers: null, refuteVerdict: null, refuteTriggeredBy: [], refuteReason: null, evidenceGaps: null, conflicts: [], outcomeStatus: "succeeded",
     failureCode: null, models: [], completionLog: [], ...over,
   };
