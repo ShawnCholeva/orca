@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { registerModelCatalogRoutes } from "./routes.js";
 import { SEED_CATALOG } from "./seed.js";
 import type { CatalogModel } from "./types.js";
@@ -112,5 +112,27 @@ describe("adapter isolation", () => {
     expect(codex.source).toBe("seed");
     expect(codex.adapterVersion).toBeNull();
     expect(codex.models).toEqual(SEED_CATALOG.codex);
+  });
+
+  it("warns, naming the adapter and the reason, when it degrades to the seed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const db = new Database(":memory:");
+      const app = Fastify();
+      registerModelCatalogRoutes(app, {
+        db,
+        load: async (_db, adapterId) => {
+          if (adapterId === "codex") throw new Error("db locked");
+          return { models: [MODEL], source: "extracted", adapterVersion: "2.1.263" };
+        },
+      });
+
+      await app.inject({ method: "GET", url: "/v1/model-catalog" });
+      const line = warn.mock.calls.map((c) => String(c[0])).find((c) => c.includes("codex"));
+      expect(line).toBeDefined();
+      expect(line).toContain("db locked");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

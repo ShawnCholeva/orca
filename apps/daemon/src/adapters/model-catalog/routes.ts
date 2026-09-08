@@ -25,7 +25,13 @@ export function registerModelCatalogRoutes(
         let loaded: LoadedCatalog;
         try {
           loaded = await deps.load(deps.db, adapterId, { force });
-        } catch {
+        } catch (err) {
+          // Say it out loud. Dropping from ~19 extracted models to the 5-entry
+          // seed is invisible in the response apart from a source badge, which
+          // is how a stale catalog goes unnoticed for weeks.
+          console.warn(
+            `[model-catalog] ${adapterId}: load failed, serving the seed — ${err instanceof Error ? err.message : String(err)}`,
+          );
           loaded = { models: SEED_CATALOG[adapterId] ?? [], source: "seed", adapterVersion: null };
         }
         return {

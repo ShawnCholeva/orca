@@ -10,9 +10,17 @@ export const PROVIDER_BY_AGENT_ID: Record<string, ModelProviderId | undefined> =
 };
 
 /**
- * Last-resort fallback when extraction fails and no cache exists. Deliberately
- * small: this is a floor that keeps dispatch working, not a catalog to maintain.
- * The extractor (Task 4) supersedes it whenever the CLI is readable.
+ * TWO ROLES — do not trim this as dead weight when the extractor is working.
+ *
+ * 1. Last-resort fallback when extraction fails and no cache exists.
+ *    Deliberately small: a floor that keeps dispatch working, not a catalog to
+ *    maintain. The extractor (Task 4) supersedes it whenever the CLI is readable.
+ * 2. The direct-API lineup. `llm/anthropic.ts` and `llm/openai.ts` advertise
+ *    these models over their own API keys — a path with no local CLI to extract
+ *    from — and `provider-catalog.ts` serves them as `/v1/model-providers`.
+ *
+ * Role 2 means an entry removed here disappears from the model-provider list
+ * even on a machine whose CLI extraction is perfectly healthy.
  */
 export const SEED_CATALOG: Record<AdapterId, CatalogModel[]> = {
   "claude-code": [

@@ -1,7 +1,8 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CatalogModel, NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
+import type { NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
+import type { CatalogEntry } from "./ModelPicker";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
 
 const schema: WorkflowStepOutputSchema = [
@@ -12,11 +13,11 @@ const AGENT_PREFERENCE: NodeModelSelection[] = [
   { kind: "pinned", adapterId: "claude-code", modelId: "claude-haiku-4-5", contextVariant: "default", effort: null },
 ];
 
-const CATALOG: CatalogModel[] = [
-  { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
+const CATALOG: CatalogEntry[] = [
+  { adapterId: "claude-code", id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
     supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
     supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" },
-  { id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
+  { adapterId: "claude-code", id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
     supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
     supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" },
 ];
@@ -406,7 +407,7 @@ describe("NodeDetailModal — model picker", () => {
       />,
     );
     const group = screen.getByRole("group", { name: "Step model" });
-    fireEvent.change(within(group).getByLabelText("Model"), { target: { value: "claude-opus-5::default" } });
+    fireEvent.change(within(group).getByLabelText("Model"), { target: { value: "claude-code::claude-opus-5::default" } });
     expect(onChange).toHaveBeenCalledTimes(1);
     const patch = onChange.mock.calls[0][0];
     expect(patch.agentPreference[0]).toMatchObject({ modelId: "claude-opus-5", contextVariant: "default" });

@@ -11,13 +11,19 @@ import { pricingRank, type CatalogModel } from "./types.js";
  * effort capabilities with no `default_effort` (e.g. claude-sonnet-4-6), and
  * omitting `--effort` there lets the user's ambient CLI settings silently
  * govern the run — exactly the defect this resolver exists to remove. Fallback
- * order: requested (if supported) -> catalog default (if set) -> "high" (if
- * supported) -> the last supported effort.
+ * order: requested (if supported) -> catalog default (if supported) -> "high"
+ * (if supported) -> the last supported effort.
+ *
+ * The catalog default gets the same membership check as the requested level.
+ * It arrives from the extracted bundle (or a cached payload, which is parsed
+ * without running the CatalogModel schema), so it is no more trusted than an
+ * authored one — an unsupported default here would reach `--effort <bogus>`,
+ * the very thing this rule exists to prevent.
  */
 function settleEffort(model: CatalogModel, wanted: EffortLevel | null): EffortLevel | null {
   if (model.supportedEfforts.length === 0) return null;
   if (wanted && model.supportedEfforts.includes(wanted)) return wanted;
-  if (model.defaultEffort) return model.defaultEffort;
+  if (model.defaultEffort && model.supportedEfforts.includes(model.defaultEffort)) return model.defaultEffort;
   if (model.supportedEfforts.includes("high")) return "high";
   return model.supportedEfforts[model.supportedEfforts.length - 1];
 }
@@ -55,6 +61,12 @@ export function resolveChoice(
   const eligible = catalog.filter((m) => m.advisorRank !== null && meets(m, profile));
   if (eligible.length === 0) return null;
 
+  // NOTE ON THE NAME: `rank: "cheapest"` sorts by advisorRank ASCENDING, so it
+  // actually means "weakest". The two coincide for the `light` profile, but a
+  // profile combining `maxPricingTier` with `cheapest` would get the weakest
+  // model within the price ceiling, not the cheapest one. The field name
+  // overstates what it selects; kept as-is because it is persisted in profiles.
+  //
   // advisorRank leads; pricingRank only tiebreaks. A model's price string can
   // be unparseable (e.g. "haiku_45") without that making it any less the
   // cheapest model in the advised lineup — pricingRank alone would sort it

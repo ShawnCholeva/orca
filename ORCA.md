@@ -81,7 +81,7 @@ The daemon (`apps/daemon/src`) is organized by subsystem. Each typically has `us
 | Workspaces | `workspaces/` | Attach/detach, bounded git inspection. |
 | Sessions (PTY) | `sessions/`, `pty/` | Daemon-owned PTY lifecycle, output tail store, reconciliation on boot. |
 | tmux worker sessions | `tmux/` | Spawn agent worker sessions in tmux (`-e KEY=VAL` env, idempotent kill-then-new). |
-| Adapters | `adapters/` | `claude-code` and `codex` spawn factories; execution-mode config + dispatcher. |
+| Adapters | `adapters/` | Agent spawn factories; execution-mode config + dispatcher; **`adapters/model-catalog/`** — the per-model catalog extracted from the installed CLI, its cache, the model profiles, and choice resolution (`/v1/model-catalog`). |
 | Agent hooks | `agent-hooks/`, `shadow-hooks/` | HTTP endpoints agents' native hooks call back into (Stop/response-done, etc.). |
 | Orchestrator-LLM | `orchestrator-llm/`, `orchestrator-chat/` | The goal-scoped mediating LLM: session, mediator, prompts, shadow vs provider client routing. |
 | Chat commands | `commands/` | Deterministic slash commands from the chat input (`POST /v1/goals/:goalId/commands`). Never routed through the orchestrator LLM — a command that can be reinterpreted is not a command. Today: `/stuck`. |
@@ -145,7 +145,7 @@ Key consequences encoded in the code:
 
 - **Step completion is hybrid-gated:** agent proposes structured output → engine validates against `outputSchema` (deterministic) → orchestrator-LLM judges satisfaction. Neither alone decides. A risky or under-verified completion also passes through an independent **refute** — see the Verify-lane arc in §14 — before it commits.
 - **Engine owns the lifecycle; the LLM never drives deterministic transitions.** The orchestrator-LLM does not get tool-call freedom to spawn agents or advance steps. This keeps progression predictable and cheap.
-- **Agent selection is template-declarative,** not LLM-selected. Each step carries an ordered `agentPreference[]` of `{adapterId, modelId}`; the resolver picks the first ready adapter that supports the model, with fallback. Template authors match model weight to workload (cheap conversational models for interview/QA; heavier reasoning for synthesis/decomposition/review).
+- **Agent selection is template-declarative,** not LLM-selected, and it is **honoured at spawn**. Each step carries an ordered `agentPreference[]` whose entries are either **pinned** (`{adapterId, modelId, contextVariant, effort}`) or a **profile reference** (`{ref}`, e.g. `light`/`reasoning`, resolved against the catalog by strength/context/price); the resolver picks the first entry a ready adapter can actually serve, with fallback. The resolved `{modelId, contextVariant, effort}` is passed to the agent CLI on the spawn command line — before this it was recorded and then dropped, so every worker ran whatever the user's ambient CLI settings said. Template authors match model weight to workload (cheap conversational models for interview/QA; heavier reasoning for synthesis/decomposition/review), and edit the choice per node in the step editor or the canvas node modal.
 - **Run progression is event-driven** after creation — the engine reacts to user messages, agent hooks, crashes, and idle timeouts. There is no central polling loop.
 
 ### Workflow templates (catalog + graph-routed)
@@ -182,6 +182,10 @@ Mode resolution: the dispatcher uses the adapter's preferred enabled mode, falls
 There are **three agent adapters: `claude-code`, `codex`, and `antigravity`** (Google's `agy` CLI) — `packages/contracts/src/adapters/ids.ts` is canonical. Earlier docs mention opencode and a shell/manual adapter (removed/historical) or "exactly two" adapters (predates the antigravity addition); trust the contract enum. Note: antigravity reached adapter/model parity but its worker **permission gate is not yet wired** (it spawns ungated — see §14 and `FUTURE_WORK.md`), so claude-code/codex are the fully-governed paths today.
 
 Adapters are daemon-internal spawn factories returning `command`, `args`, `env`, `cwd`. Both the goal-scoped orchestrator-LLM and per-step agents route through the same adapter layer, so billing and mode semantics are unified.
+
+**Model catalog (`adapters/model-catalog/`).** Which models an adapter offers is read from the **installed CLI** rather than kept as a hardcoded list that goes stale: the extractor pulls the claude-code bundle's model records out of the binary, caches them by `adapter_version`, and falls back to the newest cache and then a small checked-in `SEED_CATALOG` floor. `GET /v1/model-catalog` (plus `POST /v1/model-catalog/refresh`) serves the per-adapter lineup with a `source` badge (`extracted`/`cached`/`seed`) so a fallback is never presented as current; the desktop Settings **Models** panel and both node model pickers read it. `SEED_CATALOG` has a second role — it is also the direct-API lineup behind `/v1/model-providers`.
+
+This reads a **static configuration fact out of an installed binary at configuration time**, and was weighed against `FUTURE_ARCHITECTURE.md`'s "hooks / events over stdout scraping" rule. That rule governs **runtime orchestration signals** — what an agent did, when its turn ended — which must arrive as first-class hook events and never be inferred from a pane. A model lineup is neither runtime nor a signal, it is cached per CLI version, and it degrades to a checked-in floor when unreadable. The rule holds unchanged.
 
 LLM provider clients (`llm/anthropic.ts`, `llm/openai.ts`) sit behind a registry; the orchestrator-LLM routes between a shadow client (interactive PTY) and a provider client depending on the configured mode (`server.ts` constructs a `RoutedOrchestratorLlmClient`).
 

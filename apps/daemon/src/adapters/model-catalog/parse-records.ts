@@ -40,8 +40,9 @@ export function extractObjectLiterals(haystack: string, startMarker: string): st
 /**
  * Convert a JS object literal to JSON, then parse it. Rewrites happen only
  * outside string literals: unquoted keys gain quotes, `!0`/`!1` become
- * booleans. Returns null when the result is not valid JSON — a literal using
- * any other JS syntax is skipped rather than guessed at.
+ * booleans, and single-quoted strings are reopened as double-quoted ones.
+ * Returns null when the result is not valid JSON — a literal using any other
+ * JS syntax is skipped rather than guessed at.
  */
 export function jsLiteralToJson(src: string): unknown {
   let out = "";
@@ -50,9 +51,13 @@ export function jsLiteralToJson(src: string): unknown {
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
     if (inString) {
-      out += ch;
-      if (ch === "\\") { out += src[++i] ?? ""; continue; }
-      if (ch === quote) inString = false;
+      if (ch === "\\") { out += ch + (src[++i] ?? ""); continue; }
+      // A single-quoted literal is being reopened as a double-quoted one, so
+      // the CLOSING quote must be rewritten too — emitting it verbatim left
+      // `"value'` behind, which never parsed. A raw `"` inside such a literal
+      // is escaped for the same reason.
+      if (ch === quote) { out += '"'; inString = false; continue; }
+      out += ch === '"' ? '\\"' : ch;
       continue;
     }
     if (ch === '"' || ch === "'") { inString = true; quote = ch; out += '"'; continue; }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { CatalogModel, CreateWorkflowTemplateRequest } from "@orca/contracts";
+import type { CreateWorkflowTemplateRequest } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
-import { ModelPicker } from "./ModelPicker";
+import { ModelPicker, type CatalogEntry } from "./ModelPicker";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
 import { CloseIcon, PlusIcon } from "./icons";
 
@@ -15,7 +15,7 @@ export interface StepListEditorProps {
   // Fetched once by the parent (TemplateDetail) and shared with NodeDetailModal
   // rather than fetched per surface. A fetch failure degrades to an empty
   // catalog — Instructions and Output schema stay usable either way.
-  catalog: CatalogModel[];
+  catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
   catalogLoading?: boolean;
 }

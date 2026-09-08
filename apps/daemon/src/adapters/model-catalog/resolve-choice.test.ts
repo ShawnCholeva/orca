@@ -157,3 +157,23 @@ describe("resolveChoice — an adapter with no effort axis", () => {
     expect(got?.effort).toBeNull();
   });
 });
+
+describe("resolveChoice — a catalog default the model does not support", () => {
+  // The bundle (or a cached payload, parsed without the CatalogModel schema)
+  // can name a default effort outside supportedEfforts. Passing it through
+  // would reach `--effort <bogus>` and the step would die at spawn.
+  const BOGUS: CatalogModel[] = [{
+    id: "claude-odd-1", family: "odd", displayName: "Odd 1", contextWindow: 200_000,
+    supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
+    supportedEfforts: ["low", "medium"], defaultEffort: "max",
+  }];
+
+  it("falls through to a supported level instead of the unsupported default", () => {
+    const got = resolveChoice(
+      { kind: "pinned", adapterId: "claude-code", modelId: "claude-odd-1", contextVariant: "default", effort: null },
+      BOGUS, "claude-code", SEED_PROFILES,
+    );
+    expect(got?.effort).toBe("medium");
+    expect(BOGUS[0].supportedEfforts).toContain(got?.effort);
+  });
+});

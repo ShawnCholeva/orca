@@ -1,15 +1,20 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CatalogModel } from "@orca/contracts";
-import { ModelPicker } from "./ModelPicker.js";
+import { ModelPicker, type CatalogEntry } from "./ModelPicker.js";
 
-const CATALOG: CatalogModel[] = [
-  { id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
+// Multi-adapter on purpose: GET /v1/model-catalog always returns all three
+// adapters, and every earlier fixture mocked claude-code alone — which is why
+// the picker could emit a codex model under the claude-code adapter unnoticed.
+const CATALOG: CatalogEntry[] = [
+  { adapterId: "claude-code", id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
     supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
     supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" },
-  { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
+  { adapterId: "claude-code", id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
     supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
     supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" },
+  { adapterId: "codex", id: "gpt-5.5", family: "gpt-5", displayName: "GPT-5.5", contextWindow: 400_000,
+    supports1mSuffix: false, pricingTier: null, advisorRank: null,
+    supportedEfforts: [], defaultEffort: null },
 ];
 const PROFILES = [{ id: "reasoning", displayName: "Reasoning", requires: {}, rank: "strongest" as const }];
 
@@ -36,14 +41,14 @@ describe("ModelPicker", () => {
   it("emits the model and its variant as separate fields", () => {
     const onChange = vi.fn();
     render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-opus-5::1m" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-code::claude-opus-5::1m" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ modelId: "claude-opus-5", contextVariant: "1m" }));
   });
 
   it("resets effort to the new model's default when the choice changes", () => {
     const onChange = vi.fn();
     render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-haiku-4-5::default" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-code::claude-haiku-4-5::default" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ effort: "medium" }));
   });
 
@@ -52,6 +57,28 @@ describe("ModelPicker", () => {
     render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
     fireEvent.click(screen.getByRole("radio", { name: /profile/i }));
     expect(onChange).toHaveBeenCalledWith({ kind: "profile", ref: "reasoning" });
+  });
+
+  it("emits the adapter the chosen model belongs to, not the one already pinned", () => {
+    const onChange = vi.fn();
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "codex::gpt-5.5::default" } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ adapterId: "codex", modelId: "gpt-5.5" }));
+  });
+
+  it("pins the first row's own adapter when the pinned arm is selected", () => {
+    const onChange = vi.fn();
+    const codexFirst = [CATALOG[2], CATALOG[0]];
+    render(<ModelPicker value={{ kind: "profile", ref: "reasoning" }} catalog={codexFirst} profiles={PROFILES} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("radio", { name: /pinned model/i }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ adapterId: "codex", modelId: "gpt-5.5" }));
+  });
+
+  it("groups the models by family", () => {
+    render(<ModelPicker value={pinned} catalog={CATALOG} profiles={PROFILES} onChange={() => {}} />);
+    const select = screen.getByLabelText("Model");
+    expect(within(select).getByRole("group", { name: "opus" })).toBeInTheDocument();
+    expect(within(select).getByRole("group", { name: "gpt-5" })).toBeInTheDocument();
   });
 
   it("shows the profile's name when the node references one", () => {

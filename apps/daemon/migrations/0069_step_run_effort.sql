@@ -7,6 +7,12 @@
 -- same model at max costs materially more than at low, so attributing an
 -- outcome to a model without it is attributing it to half a fact.
 --
+-- WRITE-ONLY TODAY: the column is populated at dispatch, but nothing reads it
+-- back. It is absent from STEP_RUN_COLUMNS, from the WorkflowStepRun contract,
+-- and from every metrics reader. The argument above — that a model without its
+-- effort is half an attribution fact — is the reason the reader is pending, not
+-- a claim that it exists.
+--
 -- Additive and nullable. Rows written before this land carry NULL, and a reader
 -- must treat those as UNKNOWN effort rather than assuming the default — under
 -- the old behaviour they ran at whatever the ambient settings said.

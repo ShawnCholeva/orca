@@ -416,13 +416,39 @@ export class DispatchEngine {
         .get(ctx.stepRun.id) as { id: string } | undefined;
       if (linked) return; // a live worker is already on this step — never double-launch
     }
+    // Mirrors commitSkillStepDecision's resolve at the sibling call site: a
+    // preference no installed CLI can satisfy (a pinned model a CLI upgrade
+    // dropped, an expired credential) blocks the run and explains itself here,
+    // rather than rejecting out of the function.
+    //
+    // Rejecting propagated through advanceToNextStep into applyStepDecision —
+    // the Stop-hook completion flow — leaving the prior step committed, the
+    // next step active, no worker, and nothing said. Only ONE caller (the
+    // resume route's onResumeRespawnFailed wrapper in server.ts) ever caught
+    // it; every other path lost it. Handling it at this choke point covers all
+    // of them, so the wrapper no longer fires for this case — deliberate, and
+    // the reason its message text lives here now.
     const dispatch = await resolveStepDispatch({
       preferences: preferencesForGoal(ctx.stepTpl.agentPreference, ctx.goal.orchestrator_provider),
       isAdapterReady: (id) => this.stepDispatch!.isAdapterReady(id),
       catalogFor: (id) => this.stepDispatch!.catalogFor(id),
       profiles: this.stepDispatch!.profiles,
       resolveMode: (id) => this.stepDispatch!.resolveMode(id),
+    }).catch((err: unknown) => {
+      console.error("[dispatch] no ready agent for step", ctx.stepRun.id, err);
+      return null;
     });
+    if (!dispatch) {
+      postOrchestratorMessage(
+        db,
+        now,
+        ctx.goal.id,
+        "I couldn't get an agent going for this step. Check your provider setup (login, credentials, model access) and press Resume run once that's fixed.",
+        options
+      );
+      this.blockRun(db, now, ctx, "no ready agent for step", options);
+      return;
+    }
 
     // Persist selection only when the step has not already been operator-selected
     // (commitAdvanceOrComplete's recursion may have selected it already).

@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import type { CatalogModel, NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
+import type { NodeModelSelection, WorkflowStepOutputSchema } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
 import { GateGlyph, SplitterGlyph, CloseIcon, ChevronLeftIcon, ChevronRightIcon } from "./icons";
-import { ModelPicker } from "./ModelPicker";
+import { ModelPicker, type CatalogEntry } from "./ModelPicker";
 import { OutputSchemaEditor } from "./OutputSchemaEditor";
 
 // Falls back to this when a gate has never had a model chosen (gates aren't
@@ -62,7 +62,7 @@ export interface NodeDetailModalProps {
   onDelete: () => void;
   readOnly?: boolean;
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
-  catalog?: CatalogModel[];
+  catalog?: CatalogEntry[];
   profiles?: ModelCatalogProfile[];
   catalogLoading?: boolean;
 }
@@ -272,7 +272,7 @@ function GateBody({
 }: {
   detail: Extract<NodeDetail, { kind: "gate" }>;
   readOnly?: boolean;
-  catalog: CatalogModel[];
+  catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
   catalogLoading?: boolean;
 }) {
@@ -491,7 +491,7 @@ function StepBody({
   detail: Extract<NodeDetail, { kind: "step" }>;
   readOnly?: boolean;
   onOutputSchemaValidityChange?: (invalid: boolean) => void;
-  catalog: CatalogModel[];
+  catalog: CatalogEntry[];
   profiles: ModelCatalogProfile[];
   catalogLoading?: boolean;
 }) {

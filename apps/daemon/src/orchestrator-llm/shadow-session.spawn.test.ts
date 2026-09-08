@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ShadowSessionManager } from "./shadow-session.js";
@@ -189,5 +190,25 @@ describe("ShadowSessionManager spawn integration", () => {
     expect(trust).toBeDefined();
     const escapes = tmux.calls.filter((c) => c.args[0] === "send-keys" && c.args.includes("Escape"));
     expect(escapes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("neutralises command substitution in the launch command it hands sh -c", async () => {
+    const root = mkdtempSync(join(tmpdir(), "orca-shadow-"));
+    const pocFile = join(tmpdir(), `orca-shadow-poc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      const tmux = fakeTmux();
+      // The bin override reaches the command string verbatim. Double quotes are
+      // not shell quoting — `sh` still expands $(...) inside them — so this is
+      // proven by RUNNING the string, not by asserting on its shape.
+      const m = new ShadowSessionManager({ ...deps(root, tmux), claudeBin: `/bin/echo $(touch ${pocFile})` });
+      await m.spawn("G6");
+      const cmd = tmux.calls.find((c) => c.args[0] === "new-session")?.args.at(-1) ?? "";
+      // The quoted bin path is not a real executable, so sh exits non-zero —
+      // irrelevant. What matters is whether the substitution ran before that.
+      try { execFileSync("sh", ["-c", cmd], { stdio: "ignore" }); } catch { /* expected */ }
+      expect(existsSync(pocFile)).toBe(false);
+    } finally {
+      if (existsSync(pocFile)) rmSync(pocFile);
+    }
   });
 });

@@ -17,6 +17,10 @@ const MODELS = (SEED_CATALOG["claude-code"] ?? []).map((m) => ({
   capabilities: [] as string[],
 }));
 
+// The direct-API fallback, used when a request names no model. It must be an id
+// the Anthropic API accepts — it is NOT resolved against the extracted CLI
+// catalog, so a model the local claude-code binary ships is not automatically a
+// valid value here, nor the reverse.
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1024;
 const DEFAULT_TEMPERATURE = 0;

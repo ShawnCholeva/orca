@@ -53,6 +53,14 @@ describe("jsLiteralToJson", () => {
       .toEqual({ c: { w: 1_000_000, n: true }, caps: ["effort", "max_effort"] });
   });
 
+  it("parses a single-quoted string value", () => {
+    expect(jsLiteralToJson("{id:'claude-x',n:1}")).toEqual({ id: "claude-x", n: 1 });
+  });
+
+  it("escapes a double quote carried inside a single-quoted string", () => {
+    expect(jsLiteralToJson(`{d:'say "hi"'}`)).toEqual({ d: 'say "hi"' });
+  });
+
   it("returns null for a literal it cannot convert", () => {
     expect(jsLiteralToJson("{a:(function(){})()}")).toBeNull();
   });

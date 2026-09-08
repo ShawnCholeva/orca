@@ -298,6 +298,90 @@
   cursor: not-allowed;
 }
 
+/* Model picker — mounted in both the step editor's inline panel and the canvas
+   node modal. Follows .workflow-field's control idiom so the selects read as
+   the same family as the Instructions textarea and the output-schema controls
+   they sit between. */
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-picker__modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+}
+
+.model-picker__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.model-picker__mode input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.model-picker__mode:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.model-picker__mode:has(input:disabled) input {
+  cursor: not-allowed;
+}
+
+.model-picker__note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+.model-picker__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-picker__field > label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.model-picker__field select {
+  width: 100%;
+  border: 1px solid var(--hairline-strong);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* Effort is a five-value enum; a full-bleed control would overstate it. */
+.model-picker__field--narrow select {
+  max-width: 180px;
+}
+
+.model-picker__field select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .workflow-primary-btn,
 .workflow-quiet-btn,
 .workflow-danger-btn {

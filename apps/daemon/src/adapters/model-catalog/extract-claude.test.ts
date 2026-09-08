@@ -66,4 +66,10 @@ describe("parseClaudeCatalog", () => {
   it("skips a record missing an id instead of emitting a partial model", () => {
     expect(parseClaudeCatalog('{id:"claude-",family:"x"}')).toEqual([]);
   });
+
+  it("drops a default_effort the effort enum does not know rather than casting it through", () => {
+    const record = OPUS_5.replace('default_effort:"high"', 'default_effort:"ludicrous"');
+    const [model] = parseClaudeCatalog(record);
+    expect(model.defaultEffort).toBeNull();
+  });
 });

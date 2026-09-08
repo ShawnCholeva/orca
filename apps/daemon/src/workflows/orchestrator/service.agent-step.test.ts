@@ -1085,6 +1085,54 @@ describe("OrchestratorService agent step", () => {
     await engine.spawnStepAgent(db, () => NOW, ctx, { bus, idFactory }, { force: true });
     expect(launchFn).toHaveBeenCalledOnce();
   });
+
+  it("blocks the run when no preference resolves, instead of rejecting out of the caller", async () => {
+    // resolveStepDispatch THROWS when nothing resolves (e.g. a template pinning
+    // a model a CLI upgrade dropped). Rejecting here propagates through
+    // advanceToNextStep into applyStepDecision — the Stop-hook completion flow
+    // — leaving the prior step committed, the next step active, and no worker
+    // and no message. commitSkillStepDecision's sibling call already blocks;
+    // this path must agree with it.
+    const { db, bus, idFactory } = setupHarness();
+    setupAgentStepRun(db, { guardrailsJson: "[]" });
+    seedWorkspace(db);
+
+    const launchFn = vi.fn(async () => ({ sessionId: "sess-never" }));
+    const emptyCatalog: StepDispatchCapabilities = {
+      ...fakeStepDispatch(),
+      async catalogFor() { return []; },
+    };
+    const engine = new DispatchEngine(
+      fakeBrokerNoop(),
+      { async list() { return [agentOperatorDescriptor()]; } },
+      makeLauncher(launchFn),
+      emptyCatalog,
+      undefined,
+      undefined,
+      undefined
+    );
+
+    const run = { id: "run-1", goalId: "goal-1", templateId: "orca/engineering", templateVersion: 1, status: "active", currentStepRunId: "step-1" };
+    const stepRun = db.prepare("SELECT * FROM workflow_step_runs WHERE id = 'step-1'").get() as never;
+    const template = { id: "orca/engineering", steps: [db.prepare("SELECT steps_json FROM workflow_templates WHERE id='orca/engineering'").pluck().get()].flatMap((j) => JSON.parse(j as string)), guardrails: [] };
+    const goal = db.prepare("SELECT id, title, intent, orchestrator_provider, orchestrator_model FROM goals WHERE id='goal-1'").get() as never;
+    const ctx = { run, stepRun, stepTpl: (template.steps as Array<{ id: string }>).find((s) => s.id === (stepRun as { step_template_id: string }).step_template_id), template, goal } as never;
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(engine.spawnStepAgent(db, () => NOW, ctx, { bus, idFactory })).resolves.toBeUndefined();
+    } finally {
+      errorSpy.mockRestore();
+    }
+    expect(launchFn).not.toHaveBeenCalled();
+
+    const after = db.prepare("SELECT status, blocked_reason FROM workflow_runs WHERE id = 'run-1'").get() as { status: string; blocked_reason: string | null };
+    expect(after.status).toBe("blocked");
+    expect(after.blocked_reason).toContain("no ready agent for step");
+
+    const messages = listOrchestratorMessagesByGoal(db, "goal-1");
+    expect(messages.some((m) => m.body.includes("couldn't get an agent going"))).toBe(true);
+  });
 });
 
 describe("OrchestratorService.onAgentResponseDone (judgement loop)", () => {

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CatalogModel } from "@orca/contracts";
 import type { ModelCatalogProfile } from "../api";
+import type { CatalogEntry } from "./ModelPicker";
 import { StepEditor, type WorkflowStepDraft } from "./StepEditor";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -9,11 +9,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
-const CATALOG: CatalogModel[] = [
-  { id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
+const CATALOG: CatalogEntry[] = [
+  { adapterId: "claude-code", id: "claude-haiku-4-5", family: "haiku", displayName: "Haiku 4.5", contextWindow: 200_000,
     supports1mSuffix: false, pricingTier: "tier_1_5", advisorRank: 1,
     supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" },
-  { id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
+  { adapterId: "claude-code", id: "claude-opus-5", family: "opus", displayName: "Opus 5", contextWindow: 1_000_000,
     supports1mSuffix: true, pricingTier: "tier_5_25", advisorRank: 4,
     supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" },
 ];
@@ -204,7 +204,7 @@ describe("StepEditor", () => {
     const group = screen.getByRole("group", { name: "Step 1 model" });
     const modelSelect = within(group).getByLabelText("Model");
 
-    fireEvent.change(modelSelect, { target: { value: "claude-opus-5::default" } });
+    fireEvent.change(modelSelect, { target: { value: "claude-code::claude-opus-5::default" } });
 
     expect(onChange).toHaveBeenCalledTimes(1);
     const next: WorkflowStepDraft[] = onChange.mock.calls[0][0];

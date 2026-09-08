@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CreateWorkflowTemplateRequest,
-  type CatalogModel,
   type CreateWorkflowTemplateRequest as CreateWorkflowTemplateInput,
   type WorkflowGraph,
   type WorkflowGraphNode,
@@ -11,6 +10,7 @@ import {
 import { getModelCatalog, toErrorMessage, type ModelCatalogProfile } from "../api";
 import { createTemplate, duplicateTemplate, saveTemplate } from "./api";
 import { LockIcon } from "./icons";
+import { type CatalogEntry } from "./ModelPicker";
 import { NodeDetailModal, type NodeDetail } from "./NodeDetailModal";
 import { ScopePicker } from "./ScopeControls";
 import { StepEditor, createStepDraft, type WorkflowStepDraft } from "./StepEditor";
@@ -139,7 +139,7 @@ export function TemplateDetail({
   // and NodeDetailModal (canvas view) share the same catalog/profiles. A
   // fetch failure degrades to an empty catalog rather than blanking either
   // surface; ModelPicker disables its controls and explains itself.
-  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
+  const [catalogModels, setCatalogModels] = useState<CatalogEntry[]>([]);
   const [catalogProfiles, setCatalogProfiles] = useState<ModelCatalogProfile[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
 
@@ -148,7 +148,9 @@ export function TemplateDetail({
     getModelCatalog()
       .then((response) => {
         if (cancelled) return;
-        setCatalogModels(response.adapters.flatMap((a) => a.models));
+        // Carry the adapter id onto every row: a pin must name the adapter
+        // the model actually belongs to, not whichever one the picker assumed.
+        setCatalogModels(response.adapters.flatMap((a) => a.models.map((m) => ({ ...m, adapterId: a.adapterId }))));
         setCatalogProfiles(response.profiles);
       })
       .catch(() => {

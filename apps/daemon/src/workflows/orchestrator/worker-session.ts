@@ -5,6 +5,7 @@ import {
   type TmuxRunner,
   TMUX_OWNER_VAR,
 } from "../../tmux/runner.js";
+import { shellCommand } from "../../tmux/shell-quote.js";
 import { trustPromptMoves } from "../../tmux/trust-prompt.js";
 
 const TRUST_DEFAULT = /trust this folder|Is this a project you created or one you trust|do you trust/i;
@@ -164,20 +165,9 @@ export class WorkerSessionManager {
       copyFileSync(cp.sourcePath, target);
     }
     const name = this.name(input.sessionId);
-    // tmux runs this command string via `sh -c`, so quote any token that isn't
-    // plainly safe unquoted. A 1m model id like "claude-opus-5[1m]" contains
-    // shell glob metacharacters ([ ]) that sh -c will attempt to expand against
-    // the workspace cwd — quoting only whitespace-bearing tokens (the old rule)
-    // missed this and could silently rewrite the model id.
-    const SAFE_UNQUOTED = /^[A-Za-z0-9_.:=/-]+$/;
-    // `sh` expands $(...) and backticks inside DOUBLE quotes, so JSON.stringify is not
-    // shell quoting. Single quotes suppress every expansion; the only character that
-    // needs care is a single quote itself, which is closed, escaped, and reopened.
-    const shellQuote = (token: string): string =>
-      SAFE_UNQUOTED.test(token) ? token : `'${token.replace(/'/g, `'\\''`)}'`;
-    const command = [input.command, ...input.args, ...hookCfg.spawnArgs]
-      .map(shellQuote)
-      .join(" ");
+    // tmux runs this command string via `sh -c` — see tmux/shell-quote.ts for
+    // why the safe-unquoted set is as narrow as it is.
+    const command = shellCommand([input.command, ...input.args, ...hookCfg.spawnArgs]);
     const env = { ...input.env, ...(hookCfg.env ?? {}), [TMUX_OWNER_VAR]: this.owner() };
     await newSession(this.tmux, name, input.workspacePath, command, env);
     // Output capture: pipe pane to a private file; daemon tails it (Task 3.2).

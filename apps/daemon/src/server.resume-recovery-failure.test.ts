@@ -108,7 +108,12 @@ describe("resume respawn failure recovery (server.ts wiring)", () => {
     vi.restoreAllMocks();
   });
 
-  it("re-blocks the run, posts a plain-language chat message, and logs when the respawn can't find a ready agent", async () => {
+  // The handling moved INTO spawnStepAgent (dispatch-engine.ts): resolving the
+  // step's dispatch no longer rejects out of the function, so this wrapper is
+  // not what catches an unready adapter any more. The user-visible contract is
+  // unchanged and now holds for every caller, not just resume — hence the same
+  // assertions, minus the "[resume]" log line that only the wrapper emitted.
+  it("re-blocks the run and posts a plain-language chat message when the respawn can't find a ready agent", async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "orca-resume-recovery-fail-"));
     tempDirs.push(dir);
     const config = createConfig(dir);
@@ -186,7 +191,7 @@ describe("resume respawn failure recovery (server.ts wiring)", () => {
 
     expect(errorSpy).toHaveBeenCalled();
     expect(
-      errorSpy.mock.calls.some((call) => String(call[0]).includes("[resume]"))
+      errorSpy.mock.calls.some((call) => String(call[0]).includes("no ready agent for step"))
     ).toBe(true);
   });
 });
