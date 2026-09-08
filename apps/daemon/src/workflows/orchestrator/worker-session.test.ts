@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, existsSync, appendFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, appendFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkerSessionManager } from "./worker-session.js";
@@ -150,10 +151,11 @@ describe("WorkerSessionManager.spawn", () => {
     await mgr.spawn({ sessionId: "s-space", goalId: "g1", adapterId: "claude-code", workspacePath: "/ws", command: "claude", args: [], env: {} });
     const newSess = tmux.calls.find((c) => c[0] === "new-session")!;
     const cmd = newSess.join(" ");
-    // The path with a space must appear JSON-quoted (double-quoted) so sh -c doesn't word-split it
-    expect(cmd).toContain('"/tmp/with space/settings.json"');
+    // The path with a space must appear single-quoted so sh -c doesn't word-split it
+    // (and, unlike double quotes, single quotes also suppress $(...) / backtick expansion).
+    expect(cmd).toContain("'/tmp/with space/settings.json'");
     // The bare unquoted form must NOT appear as a standalone word-split token
-    expect(cmd).not.toMatch(/(?<!")\/tmp\/with space\/settings\.json(?!")/);
+    expect(cmd).not.toMatch(/(?<!')\/tmp\/with space\/settings\.json(?!')/);
   });
 
   it("creates parent dirs for nested relPath files", async () => {
@@ -879,6 +881,51 @@ describe("WorkerSessionManager.spawn — model args", () => {
       sessionId: "m4", goalId: "g1", adapterId: "claude-code", workspacePath: "/tmp/ws",
       command: "/bin/claude", env: {}, args: ["--model", "claude-opus-5[1m]", "--effort", "high"],
     });
-    expect(newSessionCommand(tmux)).toContain('"claude-opus-5[1m]"');
+    expect(newSessionCommand(tmux)).toContain("'claude-opus-5[1m]'");
+  });
+
+  it("neutralises command substitution in a spawn arg", async () => {
+    const { tmux, mgr } = mgrWithSpawnArgs([]);
+    await mgr.spawn({
+      sessionId: "s5", goalId: "g1", adapterId: "claude-code", workspacePath: "/tmp/ws",
+      command: "/bin/claude", env: {}, args: ["--model", "$(touch /tmp/orca-pwned)"],
+    });
+    const cmd = newSessionCommand(tmux);
+    expect(cmd).toContain(`'$(touch /tmp/orca-pwned)'`);
+    expect(cmd).not.toContain(`"$(touch /tmp/orca-pwned)"`);
+  });
+
+  it("neutralises backtick substitution in a spawn arg", async () => {
+    const { tmux, mgr } = mgrWithSpawnArgs([]);
+    await mgr.spawn({
+      sessionId: "s6", goalId: "g1", adapterId: "claude-code", workspacePath: "/tmp/ws",
+      command: "/bin/claude", env: {}, args: ["--model", "`id`"],
+    });
+    expect(newSessionCommand(tmux)).toContain("'`id`'");
+  });
+
+  it("escapes an embedded single quote so the quoting cannot be broken out of", async () => {
+    const { tmux, mgr } = mgrWithSpawnArgs([]);
+    await mgr.spawn({
+      sessionId: "s7", goalId: "g1", adapterId: "claude-code", workspacePath: "/tmp/ws",
+      command: "/bin/claude", env: {}, args: ["--model", "a'b"],
+    });
+    expect(newSessionCommand(tmux)).toContain(`'a'\\''b'`);
+  });
+
+  it("proves the quoting is safe: running the built command through sh -c has no side effect", async () => {
+    const pocFile = join(tmpdir(), `orca-poc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      const { tmux, mgr } = mgrWithSpawnArgs([]);
+      await mgr.spawn({
+        sessionId: "s8", goalId: "g1", adapterId: "claude-code", workspacePath: "/tmp/ws",
+        command: "/bin/echo", env: {}, args: ["--model", `$(touch ${pocFile})`],
+      });
+      const cmd = newSessionCommand(tmux);
+      execFileSync("sh", ["-c", cmd]);
+      expect(existsSync(pocFile)).toBe(false);
+    } finally {
+      if (existsSync(pocFile)) rmSync(pocFile);
+    }
   });
 });
