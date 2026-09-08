@@ -7,9 +7,15 @@ import Anthropic, {
 import { z } from "zod";
 import type { ModelCompletionRequest, ModelCompletionResponse, ModelProvider } from "./types.js";
 import { ProviderError } from "./types.js";
-import { MODELS_BY_AGENT_ID } from "../adapters/model-catalog.js";
+import { SEED_CATALOG } from "../adapters/model-catalog/seed.js";
 
-const MODELS = MODELS_BY_AGENT_ID["claude-code"] ?? [];
+// The direct-API path advertises the seed, not the extracted catalog: it talks
+// to the API with its own key and is not bounded by what a local CLI ships.
+const MODELS = (SEED_CATALOG["claude-code"] ?? []).map((m) => ({
+  id: m.id,
+  displayName: m.displayName,
+  capabilities: [] as string[],
+}));
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_OUTPUT_TOKENS = 1024;

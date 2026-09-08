@@ -542,10 +542,8 @@ describe('server routes', () => {
     expect(body.providers.map((provider) => provider.id)).toEqual(['orca/openai']);
     expect(body.providers[0]?.models.map((model) => model.id)).toEqual([
       'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
       'gpt-5.3-codex',
-      'gpt-5.2',
+      'gpt-5.4-mini',
     ]);
   });
 
@@ -566,8 +564,6 @@ describe('server routes', () => {
     expect(body.providers[0]?.models.map((model) => model.id)).toEqual([
       'gemini-3.5-flash',
       'gemini-3.1-pro-high',
-      'gemini-3.1-pro-low',
-      'gemini-3-flash',
     ]);
   });
 
@@ -835,7 +831,6 @@ function fakeAdapter(id: string, ready: boolean): AgentAdapter {
         : { name: 'authenticated', ok: false, authStatus: 'needs_auth', command: `${id} auth`, detail: 'not signed in' };
     },
     repairFor() { return undefined; },
-    supportsModel: () => false,
     modelSpawnArgs: () => [],
   };
 }

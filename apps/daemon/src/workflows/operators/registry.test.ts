@@ -50,10 +50,6 @@ class FakeAdapter implements AgentAdapter {
     return undefined;
   }
 
-  supportsModel(_modelId: string): boolean {
-    return false;
-  }
-
   modelSpawnArgs(): string[] {
     return [];
   }

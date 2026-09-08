@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StepAgentChoice } from "@orca/contracts";
-import { SEED_CATALOG } from "./seed.js";
+import { PROVIDER_BY_AGENT_ID, SEED_CATALOG } from "./seed.js";
 import { pricingRank } from "./types.js";
 
 describe("pricingRank", () => {
@@ -21,9 +21,19 @@ describe("pricingRank", () => {
   });
 });
 
+describe("PROVIDER_BY_AGENT_ID", () => {
+  it("maps Antigravity to Google provider metadata", () => {
+    expect(PROVIDER_BY_AGENT_ID.antigravity).toBe("orca/google");
+  });
+});
+
 describe("SEED_CATALOG", () => {
   it("carries every adapter", () => {
     expect(Object.keys(SEED_CATALOG).sort()).toEqual(["antigravity", "claude-code", "codex"]);
+  });
+
+  it("gives antigravity at least one model", () => {
+    expect(SEED_CATALOG.antigravity.length).toBeGreaterThan(0);
   });
 
   it("marks a claude model that accepts the 1m suffix", () => {

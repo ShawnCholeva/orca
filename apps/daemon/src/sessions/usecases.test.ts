@@ -394,7 +394,6 @@ function makeStartRegistry(cwd: string): AdapterRegistry {
     repairFor() {
       return undefined;
     },
-    supportsModel: () => false,
     modelSpawnArgs: () => [],
   });
   return registry;

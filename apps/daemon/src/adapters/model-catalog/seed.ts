@@ -1,7 +1,13 @@
-import type { AdapterId } from "@orca/contracts";
+import type { AdapterId, ModelProviderId } from "@orca/contracts";
 import type { CatalogModel } from "./types.js";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+export const PROVIDER_BY_AGENT_ID: Record<string, ModelProviderId | undefined> = {
+  "claude-code": "orca/anthropic",
+  codex: "orca/openai",
+  antigravity: "orca/google",
+};
 
 /**
  * Last-resort fallback when extraction fails and no cache exists. Deliberately

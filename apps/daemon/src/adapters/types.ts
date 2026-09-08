@@ -56,8 +56,6 @@ export interface AgentAdapter {
    * The runtime DB-backed AdapterExecutionModeConfig must declare a subset of these.
    */
   supportedExecutionModes: ExecutionMode[];
-  /** Return true if this adapter can drive the given model id. */
-  supportsModel(modelId: string): boolean;
   /** Translate a resolved choice into this CLI's own flags. */
   modelSpawnArgs(choice: ResolvedModelChoice): string[];
   contextDelivery: AdapterContextDelivery;

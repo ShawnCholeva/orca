@@ -84,10 +84,8 @@ describe("orchestration transport provider catalog", () => {
     expect(catalog.map((provider) => provider.id)).toEqual(["orca/openai"]);
     expect(catalog[0]?.models.map((model) => model.id)).toEqual([
       "gpt-5.5",
-      "gpt-5.4",
-      "gpt-5.4-mini",
       "gpt-5.3-codex",
-      "gpt-5.2",
+      "gpt-5.4-mini",
     ]);
   });
 

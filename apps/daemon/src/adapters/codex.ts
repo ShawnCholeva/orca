@@ -18,7 +18,6 @@ import type {
   ExecutionMode,
   ResolvedModelChoice,
 } from "@orca/contracts";
-import { adapterSupportsModel } from "./model-catalog.js";
 
 export type RunCheckFn = (
   command: string,
@@ -34,10 +33,6 @@ export class CodexAdapter implements AgentAdapter {
   readonly title = "Codex";
   readonly supportedExecutionModes: ExecutionMode[] = ["one_shot", "shadow_session"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
-
-  supportsModel(modelId: string): boolean {
-    return adapterSupportsModel(this.id, modelId);
-  }
 
   modelSpawnArgs(choice: ResolvedModelChoice): string[] {
     const args = ["-m", choice.modelId];

@@ -2,10 +2,16 @@ import OpenAI from "openai";
 import { z } from "zod";
 import type { ModelCompletionRequest, ModelCompletionResponse, ModelProvider } from "./types.js";
 import { ProviderError } from "./types.js";
-import { MODELS_BY_AGENT_ID } from "../adapters/model-catalog.js";
+import { SEED_CATALOG } from "../adapters/model-catalog/seed.js";
 
+// The direct-API path advertises the seed, not the extracted catalog: it talks
+// to the API with its own key and is not bounded by what a local CLI ships.
 const MODELS = [
-  ...(MODELS_BY_AGENT_ID.codex ?? []),
+  ...(SEED_CATALOG.codex ?? []).map((m) => ({
+    id: m.id,
+    displayName: m.displayName,
+    capabilities: [] as string[],
+  })),
   {
     id: "gpt-5",
     displayName: "GPT-5",

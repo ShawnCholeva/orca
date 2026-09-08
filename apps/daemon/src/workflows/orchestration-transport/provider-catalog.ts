@@ -1,10 +1,8 @@
-import type { ModelProviderInfo, ModelProviderId } from "@orca/contracts";
+import type { AdapterId, ModelProviderInfo, ModelProviderId } from "@orca/contracts";
 import type { ModelProviderRegistry } from "../../llm/registry.js";
-import {
-  MODELS_BY_AGENT_ID,
-  PROVIDER_BY_AGENT_ID,
-  type AdapterModelInfo,
-} from "../../adapters/model-catalog.js";
+import { PROVIDER_BY_AGENT_ID, SEED_CATALOG } from "../../adapters/model-catalog/seed.js";
+
+type AdapterModelInfo = ModelProviderInfo["models"][number];
 
 const MAX_REASON_CHARS = 256;
 
@@ -49,8 +47,13 @@ export function modelOverridesForConnectedAgents(
   for (const agent of agents) {
     if (!agent.connected) continue;
     const providerId = PROVIDER_BY_AGENT_ID[agent.id];
-    const models = MODELS_BY_AGENT_ID[agent.id];
-    if (providerId && models) overrides.set(providerId, models);
+    const models = SEED_CATALOG[agent.id as AdapterId];
+    if (providerId && models) {
+      overrides.set(
+        providerId,
+        models.map((model) => ({ id: model.id, displayName: model.displayName, capabilities: [] as string[] }))
+      );
+    }
   }
   return overrides;
 }

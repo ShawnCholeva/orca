@@ -18,7 +18,6 @@ import type {
   ExecutionMode,
   ResolvedModelChoice,
 } from "@orca/contracts";
-import { adapterSupportsModel } from "./model-catalog.js";
 
 export type RunCheckFn = (
   command: string,
@@ -35,10 +34,6 @@ export class AntigravityAdapter implements AgentAdapter {
   readonly title = "Antigravity";
   readonly supportedExecutionModes: ExecutionMode[] = ["shadow_session", "one_shot"];
   readonly contextDelivery: AdapterContextDelivery = { mode: "preview_only", maxBytes: 32768 };
-
-  supportsModel(modelId: string): boolean {
-    return adapterSupportsModel(this.id, modelId);
-  }
 
   modelSpawnArgs(choice: ResolvedModelChoice): string[] {
     return ["--model", choice.modelId];
