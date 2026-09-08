@@ -20,6 +20,11 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
   const model = isPinned ? catalog.find((m) => m.id === value.modelId) : undefined;
   const modelSelectId = `${idPrefix}model-select`;
   const effortSelectId = `${idPrefix}effort-select`;
+  // An empty list means there is nothing valid to select — disable the
+  // control rather than let the UI emit a choice that fails contract
+  // validation (min(1) on modelId/ref) at save time with no context.
+  const noModels = catalog.length === 0;
+  const noProfiles = profiles.length === 0;
 
   const rows = catalog.flatMap((m) => [
     { key: `${m.id}::default`, label: m.displayName },
@@ -33,7 +38,7 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
           type="radio"
           name={`${idPrefix}model-kind`}
           checked={isPinned}
-          disabled={disabled}
+          disabled={disabled || noModels}
           onChange={() => {
             const first = catalog[0];
             onChange({
@@ -47,16 +52,26 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
         />
         Pinned model
       </label>
+      {noModels && (
+        <p className="mono" style={{ fontSize: 10, color: "var(--text-3)" }}>
+          No models available — check the model catalog in Settings.
+        </p>
+      )}
       <label>
         <input
           type="radio"
           name={`${idPrefix}model-kind`}
           checked={!isPinned}
-          disabled={disabled}
+          disabled={disabled || noProfiles}
           onChange={() => onChange({ kind: "profile", ref: profiles[0]?.id ?? "" })}
         />
         Profile
       </label>
+      {noProfiles && (
+        <p className="mono" style={{ fontSize: 10, color: "var(--text-3)" }}>
+          No profiles available — check the model catalog in Settings.
+        </p>
+      )}
 
       {isPinned ? (
         <>
@@ -64,7 +79,7 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
           <select
             id={modelSelectId}
             value={`${value.modelId}::${value.contextVariant}`}
-            disabled={disabled}
+            disabled={disabled || noModels}
             onChange={(e) => {
               const [modelId, variant] = e.target.value.split("::") as [string, ContextVariant];
               const next = catalog.find((m) => m.id === modelId);
@@ -99,7 +114,7 @@ export function ModelPicker({ value, catalog, profiles, onChange, disabled, idPr
         <select
           aria-label="Profile"
           value={value.ref}
-          disabled={disabled}
+          disabled={disabled || noProfiles}
           onChange={(e) => onChange({ kind: "profile", ref: e.target.value })}
         >
           {profiles.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}

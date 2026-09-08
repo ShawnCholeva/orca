@@ -405,7 +405,7 @@ describe("TemplateDetail", () => {
 
   // ── Scope picker ──────────────────────────────────────────────────────────
 
-  it("scope picker is shown in edit mode and goal options are passed", () => {
+  it("scope picker is shown in edit mode and goal options are passed", async () => {
     render(
       <TemplateDetail
         template={makeTemplate()}
@@ -417,6 +417,7 @@ describe("TemplateDetail", () => {
 
     // Enter edit mode
     fireEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+    await waitFor(() => expect(getModelCatalogMock).toHaveBeenCalled());
 
     // Scope options visible
     expect(screen.getByText("Global")).toBeInTheDocument();
@@ -530,7 +531,7 @@ describe("TemplateDetail", () => {
     );
   });
 
-  it("draft create: Discard calls onDiscard", () => {
+  it("draft create: Discard calls onDiscard", async () => {
     const onDiscard = vi.fn();
     render(
       <TemplateDetail
@@ -541,6 +542,7 @@ describe("TemplateDetail", () => {
         onDiscard={onDiscard}
       />,
     );
+    await waitFor(() => expect(getModelCatalogMock).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
     expect(onDiscard).toHaveBeenCalledTimes(1);

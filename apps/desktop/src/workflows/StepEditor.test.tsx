@@ -32,6 +32,11 @@ const CATALOG_RESPONSE = {
       ],
     },
   ],
+  profiles: [{ id: "reasoning", displayName: "Reasoning" }],
+};
+
+const EMPTY_CATALOG_RESPONSE = {
+  adapters: [{ adapterId: "claude-code" as const, adapterVersion: null, source: "seed" as const, models: [] }],
   profiles: [],
 };
 
@@ -59,21 +64,31 @@ const baseSteps: WorkflowStepDraft[] = [
   makeStep("step-2", "Implement"),
 ];
 
+// Renders and waits for the (mocked) catalog fetch to settle, so the
+// component's post-mount state update happens inside this awaited flush
+// rather than leaking into a later, unrelated act() — the fetch fires on
+// every mount regardless of whether a row is expanded.
+async function renderSettled(...args: Parameters<typeof render>) {
+  const utils = render(...args);
+  await waitFor(() => expect(getModelCatalogMock).toHaveBeenCalled());
+  return utils;
+}
+
 describe("StepEditor", () => {
   beforeEach(() => {
     getModelCatalogMock.mockReset();
     getModelCatalogMock.mockResolvedValue(CATALOG_RESPONSE);
   });
 
-  it("renders a row per step with its name", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+  it("renders a row per step with its name", async () => {
+    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
     expect(screen.getByDisplayValue("Research")).toBeDefined();
     expect(screen.getByDisplayValue("Implement")).toBeDefined();
   });
 
-  it("editing a name input calls onChange with updated name", () => {
+  it("editing a name input calls onChange with updated name", async () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
 
     const input = screen.getByDisplayValue("Research");
     fireEvent.change(input, { target: { value: "Research v2" } });
@@ -84,9 +99,9 @@ describe("StepEditor", () => {
     expect(next[1].name).toBe("Implement");
   });
 
-  it("Add step calls onChange with one more step (with default outputSchema)", () => {
+  it("Add step calls onChange with one more step (with default outputSchema)", async () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
 
     fireEvent.click(screen.getByRole("button", { name: /add step/i }));
 
@@ -96,9 +111,9 @@ describe("StepEditor", () => {
     expect(next[2].outputSchema).toEqual([{ key: "result", type: "string", required: true }]);
   });
 
-  it("Remove calls onChange with that step gone", () => {
+  it("Remove calls onChange with that step gone", async () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
 
     const removeBtns = screen.getAllByTitle("Remove step");
     fireEvent.click(removeBtns[0]);
@@ -109,9 +124,9 @@ describe("StepEditor", () => {
     expect(next[0].id).toBe("step-2");
   });
 
-  it("Move up reorders — first step of second row goes before first", () => {
+  it("Move up reorders — first step of second row goes before first", async () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
 
     const moveUpBtns = screen.getAllByTitle("Move up");
     // Second step's "Move up"
@@ -123,9 +138,9 @@ describe("StepEditor", () => {
     expect(next[1].id).toBe("step-1");
   });
 
-  it("Move down reorders — first step moves to second position", () => {
+  it("Move down reorders — first step moves to second position", async () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
 
     const moveDownBtns = screen.getAllByTitle("Move down");
     // First step's "Move down"
@@ -137,8 +152,8 @@ describe("StepEditor", () => {
     expect(next[1].id).toBe("step-1");
   });
 
-  it("expanding a row reveals instructions textarea and output schema editor", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+  it("expanding a row reveals instructions textarea and output schema editor", async () => {
+    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
 
     // Initially the detail panel is collapsed — no instructions textareas visible
     expect(screen.queryByLabelText("Step 1 instructions")).toBeNull();
@@ -152,9 +167,9 @@ describe("StepEditor", () => {
     expect(screen.getByText(/output schema/i)).toBeDefined();
   });
 
-  it("editing instructions calls onChange with updated value", () => {
+  it("editing instructions calls onChange with updated value", async () => {
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
 
     // Expand first row
     const detailBtns = screen.getAllByTitle("Edit details");
@@ -168,8 +183,8 @@ describe("StepEditor", () => {
     expect(next[0].instructions).toBe("Do the research.");
   });
 
-  it("disabled hides add/remove/move buttons and disables name inputs", () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} disabled />);
+  it("disabled hides add/remove/move buttons and disables name inputs", async () => {
+    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} disabled />);
 
     expect(screen.queryByRole("button", { name: /add step/i })).toBeNull();
     expect(screen.queryByTitle("Remove step")).toBeNull();
@@ -182,11 +197,11 @@ describe("StepEditor", () => {
     }
   });
 
-  it("disabled still allows expanding to view details (read-only)", () => {
+  it("disabled still allows expanding to view details (read-only)", async () => {
     const stepWithInstructions: WorkflowStepDraft[] = [
       { ...makeStep("step-1", "Research"), instructions: "Gather data." },
     ];
-    render(<StepEditor steps={stepWithInstructions} onChange={vi.fn()} disabled />);
+    await renderSettled(<StepEditor steps={stepWithInstructions} onChange={vi.fn()} disabled />);
 
     const detailBtn = screen.getByTitle("Edit details");
     fireEvent.click(detailBtn);
@@ -197,7 +212,7 @@ describe("StepEditor", () => {
   });
 
   it("renders a model picker for a step", async () => {
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
 
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
@@ -218,7 +233,7 @@ describe("StepEditor", () => {
         ],
       },
     ];
-    render(<StepEditor steps={stepWithFallback} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={stepWithFallback} onChange={onChange} />);
 
     fireEvent.click(screen.getByTitle("Edit details"));
     const group = await screen.findByRole("group", { name: "Step 1 model" });
@@ -237,10 +252,8 @@ describe("StepEditor", () => {
     getModelCatalogMock.mockRejectedValue(new Error("network down"));
 
     const onChange = vi.fn();
-    render(<StepEditor steps={baseSteps} onChange={onChange} />);
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
-
-    await waitFor(() => expect(getModelCatalogMock).toHaveBeenCalled());
 
     const textarea = screen.getByLabelText("Step 1 instructions");
     fireEvent.change(textarea, { target: { value: "Still works." } });
@@ -248,20 +261,74 @@ describe("StepEditor", () => {
     expect(screen.getByText(/output schema/i)).toBeDefined();
   });
 
-  it("does not crash when the catalog has no models", async () => {
+  it("an empty model list disables the Pinned control, shows why, and never lets onChange emit an empty modelId", async () => {
     getModelCatalogMock.mockReset();
-    getModelCatalogMock.mockResolvedValue({
-      adapters: [{ adapterId: "claude-code", adapterVersion: null, source: "seed", models: [] }],
-      profiles: [],
-    });
+    getModelCatalogMock.mockResolvedValue(EMPTY_CATALOG_RESPONSE);
 
-    render(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+    const onChange = vi.fn();
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
     fireEvent.click(screen.getAllByTitle("Edit details")[0]);
 
     const group = await screen.findByRole("group", { name: "Step 1 model" });
-    expect(within(group).getByLabelText("Model")).toBeDefined();
+    const pinnedRadio = within(group).getByRole("radio", { name: /pinned model/i }) as HTMLInputElement;
+    const modelSelect = within(group).getByLabelText("Model") as HTMLSelectElement;
 
-    // Toggling to "Profile" mode with zero profiles must not throw on an empty array index.
-    fireEvent.click(within(group).getByRole("radio", { name: /profile/i }));
+    expect(pinnedRadio.disabled).toBe(true);
+    expect(modelSelect.disabled).toBe(true);
+    expect(within(group).getByText(/no models available/i)).toBeDefined();
+    // The model select has nothing to offer — no options for a user to pick,
+    // so there is no route to an empty-modelId onChange through this control.
+    expect(modelSelect.options.length).toBe(0);
+
+    // A disabled radio does not respond to a user click — no onChange call,
+    // let alone one carrying an empty modelId.
+    fireEvent.click(pinnedRadio);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("an empty profile list disables the Profile control and never lets onChange emit an empty ref", async () => {
+    getModelCatalogMock.mockReset();
+    getModelCatalogMock.mockResolvedValue({
+      adapters: [
+        {
+          adapterId: "claude-code" as const,
+          adapterVersion: "2.1.263",
+          source: "extracted" as const,
+          models: CATALOG_RESPONSE.adapters[0]!.models,
+        },
+      ],
+      profiles: [],
+    });
+
+    const onChange = vi.fn();
+    await renderSettled(<StepEditor steps={baseSteps} onChange={onChange} />);
+    fireEvent.click(screen.getAllByTitle("Edit details")[0]);
+
+    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const profileRadio = within(group).getByRole("radio", { name: /^profile$/i }) as HTMLInputElement;
+
+    expect(profileRadio.disabled).toBe(true);
+    expect(within(group).getByText(/no profiles available/i)).toBeDefined();
+
+    // A disabled radio does not respond to a user click — no onChange call,
+    // let alone one carrying an empty ref.
+    fireEvent.click(profileRadio);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("a populated catalog keeps both the Pinned and Profile controls enabled", async () => {
+    await renderSettled(<StepEditor steps={baseSteps} onChange={vi.fn()} />);
+    fireEvent.click(screen.getAllByTitle("Edit details")[0]);
+
+    const group = await screen.findByRole("group", { name: "Step 1 model" });
+    const pinnedRadio = within(group).getByRole("radio", { name: /pinned model/i }) as HTMLInputElement;
+    const profileRadio = within(group).getByRole("radio", { name: /^profile$/i }) as HTMLInputElement;
+    const modelSelect = within(group).getByLabelText("Model") as HTMLSelectElement;
+
+    expect(pinnedRadio.disabled).toBe(false);
+    expect(profileRadio.disabled).toBe(false);
+    expect(modelSelect.disabled).toBe(false);
+    expect(within(group).queryByText(/no models available/i)).toBeNull();
+    expect(within(group).queryByText(/no profiles available/i)).toBeNull();
   });
 });
