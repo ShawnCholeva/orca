@@ -52,6 +52,16 @@ export async function sessionOwner(r: TmuxRunner, name: string): Promise<string 
   return line.slice(TMUX_OWNER_VAR.length + 1);
 }
 
+/**
+ * Every worker pane is created at this fixed size and never resized: the
+ * orchestrator's busy/idle detection reads the pane as text, and a narrower pane
+ * wraps the status line its BUSY pattern matches on. Viewers must therefore
+ * render AT this geometry rather than reshape it — a viewer with a different
+ * column count puts every cursor-addressed redraw in the wrong place.
+ */
+export const WORKER_PANE_COLS = 220;
+export const WORKER_PANE_ROWS = 50;
+
 export async function newSession(
   r: TmuxRunner,
   name: string,
@@ -66,7 +76,11 @@ export async function newSession(
   // agent dies with no signal.
   const replaced = await r.run(["kill-session", "-t", name]);
   if (replaced.code === 0) console.warn(`[tmux] new-session replaced a live session ${name}`);
-  const res = await r.run(["new-session", "-d", "-s", name, "-x", "220", "-y", "50", ...envArgs, "-c", cwd, command]);
+  const res = await r.run([
+    "new-session", "-d", "-s", name,
+    "-x", String(WORKER_PANE_COLS), "-y", String(WORKER_PANE_ROWS),
+    ...envArgs, "-c", cwd, command,
+  ]);
   return { code: res.code };
 }
 
@@ -87,8 +101,33 @@ export async function sendKey(r: TmuxRunner, name: string, key: string): Promise
   await r.run(["send-keys", "-t", name, key]);
 }
 
+/**
+ * Writes raw terminal bytes to a pane, as a tty would deliver them. `-H` takes
+ * hex byte values, so control characters and escape sequences (Enter, arrows,
+ * Ctrl-C) survive intact — unlike `-l`, which is text-only. This is how a human
+ * at the embedded terminal reaches a tmux-backed agent, which has no pty handle
+ * in the daemon to write to.
+ */
+export async function sendRawBytes(r: TmuxRunner, name: string, bytes: Buffer): Promise<boolean> {
+  if (bytes.length === 0) return true;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0"));
+  const res = await r.run(["send-keys", "-t", name, "-H", ...hex]);
+  return res.code === 0;
+}
+
+/**
+ * Streams everything the pane draws into a file, which the daemon then tails.
+ *
+ * Deliberately NOT `pipe-pane -o`: that flag TOGGLES. It opens a pipe only when
+ * none is open and closes the one that is — so calling it twice leaves the pane
+ * unpiped. The tmux server outlives the daemon, so a worker's pipe is still open
+ * across a daemon restart, and reattach's call was silently switching capture OFF
+ * for that worker. Every other daemon restart therefore blinded the whole system
+ * to what its agents were doing. Plain `pipe-pane` replaces whatever is there and
+ * is safe to call as often as we like.
+ */
 export async function pipePaneToFile(r: TmuxRunner, name: string, filePath: string): Promise<void> {
-  await r.run(["pipe-pane", "-o", "-t", name, `cat >> ${JSON.stringify(filePath)}`]);
+  await r.run(["pipe-pane", "-t", name, `cat >> ${JSON.stringify(filePath)}`]);
 }
 
 /**

@@ -173,8 +173,17 @@ export class SessionRuntime {
     this.wsBufferLimitBytes = wsBufferLimitBytes;
   }
 
-  // Slow consumers (bufferedAmount > limit) are closed and removed after each send.
-  private broadcastOutput(sessionId: string, seq: number, byteOffset: number, chunk: Buffer): void {
+  /**
+   * Fans one chunk out to everyone watching the session.
+   *
+   * Public because not all output comes from a pty this process owns: a workflow
+   * worker's output is tailed off its tmux pane and has to reach viewers by the
+   * same path, or the session is only ever visible as a snapshot and looks frozen
+   * to anyone already watching it.
+   *
+   * Slow consumers (bufferedAmount > limit) are closed and removed after each send.
+   */
+  broadcastOutput(sessionId: string, seq: number, byteOffset: number, chunk: Buffer): void {
     const subscribers = this.subscriberMap.get(sessionId);
     if (!subscribers || subscribers.size === 0) return;
 

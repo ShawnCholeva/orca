@@ -40,6 +40,7 @@ import {
   UpdateAgentRequest,
   type ListAdaptersResponse,
   RefineGoalRequest,
+  SessionErrorFrameCode,
   SessionInputFrame,
   SessionResizeFrame,
   SessionSubscribeFrame,
@@ -278,7 +279,8 @@ import { composeOrchestratorPrompt } from './orchestrator-llm/prompts.js';
 import { buildContextFromDb } from './orchestrator-llm/build-context.js';
 import { registerWorkflowStepRoutes } from './workflows/steps/routes.js';
 import { registerAgentHookRoutes } from './agent-hooks/routes.js';
-import { WorkerSessionManager } from './workflows/orchestrator/worker-session.js';
+import { WorkerSessionManager, type WriteInputResult } from './workflows/orchestrator/worker-session.js';
+import { createWorkerCaptureSink } from './sessions/worker-capture.js';
 import { defaultTmuxRunner, tmuxSocketPath } from './tmux/runner.js';
 import { stepWorkDoneSql } from './workflows/orchestrator/db-rows.js';
 import { reapOrphanTmuxSessions, workerSessionIdsForRun } from './sessions/reap-orphan-sessions.js';
@@ -373,6 +375,9 @@ export function createServer(
     // Override the idle-gated worker stdin delivery (defaults to the real tmux
     // WorkerSessionManager.deliver). Tests inject a deterministic stub.
     workerDeliver?: (sessionId: string, text: string) => Promise<"delivered" | "no_session" | "timeout">;
+    // Override the idle-gated raw keystroke path a human at the embedded
+    // terminal takes into a tmux worker (defaults to WorkerSessionManager.writeInput).
+    workerWriteInput?: (sessionId: string, bytes: Buffer) => Promise<WriteInputResult>;
   }
 ): FastifyInstance {
   const startedAt = new Date().toISOString();
@@ -711,11 +716,15 @@ export function createServer(
     hookResolverCommand: config.hookResolverCommand,
     claudeBin: process.env["ORCA_CLAUDE_CODE_BIN"] ?? "claude",
     resolveProvider: (adapterId) => resolveAgentProvider(adapterId as ShadowAdapterId),
-    captureSink: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
-    markRunning: (sessionId) => {
+    captureSink: createWorkerCaptureSink({
+      appendChunk: (sessionId, chunk) => sessionOutputStore.appendChunk(sessionId, chunk),
+      broadcastOutput: (sessionId, seq, byteOffset, chunk) =>
+        sessionRuntime.broadcastOutput(sessionId, seq, byteOffset, chunk),
+    }),
+    markRunning: (sessionId, pane) => {
       db.prepare(
-        "UPDATE sessions SET status = 'running', started_at = COALESCE(started_at, ?) WHERE id = ?"
-      ).run(new Date().toISOString(), sessionId);
+        "UPDATE sessions SET status = 'running', started_at = COALESCE(started_at, ?), pane_fixed = 1, terminal_cols = ?, terminal_rows = ? WHERE id = ?"
+      ).run(new Date().toISOString(), pane.cols, pane.rows, sessionId);
     },
     // The manager reaps deliberately-terminated workers, so it reports the
     // terminal status too — only flipping rows that are still live, so a
@@ -853,6 +862,8 @@ export function createServer(
     await workerSessions.spawn({ sessionId, goalId, adapterId, workspacePath: wsRow.path, command: sandboxed.command, args: sandboxed.args, env: sandboxed.env });
   };
   const baseWorkerDeliver = deps?.workerDeliver ?? ((sessionId: string, text: string) => workerSessions.deliver(sessionId, text));
+  const workerWriteInput =
+    deps?.workerWriteInput ?? ((sessionId: string, bytes: Buffer) => workerSessions.writeInput(sessionId, bytes));
   // Every prompt a worker receives — the objective, a forward, a revision, recovery
   // guidance — lands through here, so this is where a worker turn begins. Recorded
   // only once the paste actually landed; the idle wait before it is not the turn.
@@ -2884,7 +2895,7 @@ export function createServer(
   function sendSessionError(
     socket: WsClient,
     sessionId: string | undefined,
-    code: 'unknown_session' | 'not_active' | 'invalid_message',
+    code: SessionErrorFrameCode,
     message: string
   ): void {
     if (socket.readyState !== WS_CLIENT_OPEN) return;
@@ -2974,9 +2985,29 @@ export function createServer(
               const session = getSessionDetail(db, frame.data.sessionId);
               if (!session) {
                 sendSessionError(wsClient, frame.data.sessionId, 'unknown_session', 'session not found');
-              } else {
-                sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
+                return;
               }
+              // Workflow workers run on the daemon's tmux server, not on a pty
+              // this process owns, so there is no handle to write to. Their keys
+              // go through tmux instead — admitted only between the agent's
+              // turns, since the orchestrator drives the same pane.
+              void workerWriteInput(frame.data.sessionId, Buffer.from(frame.data.dataBase64, 'base64'))
+                .then((result) => {
+                  if (result === 'written') return;
+                  if (result === 'busy') {
+                    sendSessionError(
+                      wsClient,
+                      frame.data.sessionId,
+                      'agent_busy',
+                      'the agent is working — wait for it to finish its turn'
+                    );
+                  } else {
+                    sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
+                  }
+                })
+                .catch(() => {
+                  sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
+                });
               return;
             }
             handle.write(Buffer.from(frame.data.dataBase64, 'base64'));
@@ -2994,9 +3025,14 @@ export function createServer(
               const session = getSessionDetail(db, frame.data.sessionId);
               if (!session) {
                 sendSessionError(wsClient, frame.data.sessionId, 'unknown_session', 'session not found');
-              } else {
-                sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
+                return;
               }
+              // A tmux worker's pane is sized once at spawn and is scraped by the
+              // orchestrator's idle/busy detection, so a viewer does not get to
+              // reshape it. Accepting the resize silently keeps a viewer that is
+              // merely reporting its own size from looking like a dead session.
+              if (session.paneFixed) return;
+              sendSessionError(wsClient, frame.data.sessionId, 'not_active', 'session not running');
               return;
             }
             sessionRuntime.resize(db, frame.data.sessionId, frame.data.cols, frame.data.rows);

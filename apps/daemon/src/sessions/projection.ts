@@ -9,6 +9,7 @@ interface SessionRow {
   context_package_id: string | null;
   task_id: string | null;
   from_recommendation_id: string | null;
+  workflow_step_run_id: string | null;
   role: string | null;
   instruction: string | null;
   title: string;
@@ -17,6 +18,7 @@ interface SessionRow {
   command: string | null;
   args_json: string | null;
   cwd: string | null;
+  pane_fixed: number | null;
   terminal_cols: number | null;
   terminal_rows: number | null;
   exit_code: number | null;
@@ -58,8 +60,9 @@ export interface InsertSessionRow {
 }
 
 const SESSION_COLS = `s.id, s.goal_id, s.workspace_id, s.adapter_id, s.context_package_id, s.task_id, s.from_recommendation_id,
+  s.workflow_step_run_id,
   s.role, s.instruction, s.title, s.status, s.pid,
-  s.command, s.args_json, s.cwd, s.terminal_cols, s.terminal_rows, s.exit_code, s.exit_signal,
+  s.command, s.args_json, s.cwd, s.pane_fixed, s.terminal_cols, s.terminal_rows, s.exit_code, s.exit_signal,
   s.failure_reason, s.failure_detail, s.created_at, s.started_at, s.exited_at, s.archived_at,
   s.model_id, s.context_variant, s.effort,
   latest_extraction.id AS latest_extraction_id,
@@ -99,9 +102,13 @@ function rowToSummary(row: SessionRow): SessionSummary {
     contextPackageId: row.context_package_id,
     taskId: row.task_id,
     fromRecommendationId: row.from_recommendation_id,
+    workflowStepRunId: row.workflow_step_run_id,
     role: row.role,
     title: row.title,
     status: row.status,
+    paneFixed: row.pane_fixed === 1,
+    terminalCols: row.terminal_cols,
+    terminalRows: row.terminal_rows,
     createdAt: row.created_at,
     startedAt: row.started_at,
     exitedAt: row.exited_at,
@@ -128,6 +135,7 @@ function rowToDetail(row: SessionRow): SessionDetail {
     contextPackageId: row.context_package_id,
     taskId: row.task_id,
     fromRecommendationId: row.from_recommendation_id,
+    workflowStepRunId: row.workflow_step_run_id,
     role: row.role,
     title: row.title,
     status: row.status,
@@ -139,6 +147,7 @@ function rowToDetail(row: SessionRow): SessionDetail {
     command: row.command,
     args: row.args_json ? (JSON.parse(row.args_json) as string[]) : null,
     cwd: row.cwd,
+    paneFixed: row.pane_fixed === 1,
     terminalCols: row.terminal_cols,
     terminalRows: row.terminal_rows,
     exitCode: row.exit_code,
@@ -249,6 +258,7 @@ export interface SetSessionStatusFields {
   command?: string | null;
   argsJson?: string | null;
   cwd?: string | null;
+  paneFixed?: boolean;
   terminalCols?: number | null;
   terminalRows?: number | null;
   exitCode?: number | null;
@@ -264,6 +274,7 @@ const FIELD_TO_COL: Record<keyof SetSessionStatusFields, string> = {
   command: 'command',
   argsJson: 'args_json',
   cwd: 'cwd',
+  paneFixed: 'pane_fixed',
   terminalCols: 'terminal_cols',
   terminalRows: 'terminal_rows',
   exitCode: 'exit_code',

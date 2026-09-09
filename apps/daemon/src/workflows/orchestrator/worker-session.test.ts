@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, existsSync, appendFileSync, writeFileSync, m
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WorkerSessionManager } from "./worker-session.js";
+import { WorkerSessionManager, isPaneIdle } from "./worker-session.js";
 import type { TmuxRunner } from "../../tmux/runner.js";
 import { resolveAgentProvider } from "../../orchestrator-llm/providers/registry.js";
 import type { ShadowAdapterId } from "../../orchestrator-llm/providers/types.js";
@@ -927,5 +927,206 @@ describe("WorkerSessionManager.spawn — model args", () => {
     } finally {
       if (existsSync(pocFile)) rmSync(pocFile);
     }
+  });
+});
+
+describe("isPaneIdle", () => {
+  const composer = "\n❯ \n";
+
+  it("is idle at a rendered composer with no turn in flight", () => {
+    expect(isPaneIdle(`✻ Crunched for 18s · done${composer}`)).toBe(true);
+  });
+
+  it("is busy while a turn is running", () => {
+    expect(isPaneIdle(`✻ Thinking… (esc to interrupt)${composer}`)).toBe(false);
+  });
+
+  it("is busy while a hook runs", () => {
+    expect(isPaneIdle(`running PreToolUse hook${composer}`)).toBe(false);
+  });
+
+  it("recognises codex's composer", () => {
+    expect(isPaneIdle("\n› summarize recent commits\n")).toBe(true);
+  });
+
+  it("is not idle before any composer has rendered", () => {
+    expect(isPaneIdle("Loading...\n")).toBe(false);
+  });
+});
+
+describe("WorkerSessionManager.writeInput", () => {
+  function manager(tmux: TmuxRunner) {
+    return new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+  }
+
+  it("sends raw bytes as hex while the pane is idle", async () => {
+    const tmux = fakeTmux(["✻ done\n❯ \n"]);
+    const result = await manager(tmux).writeInput("sess-1", Buffer.from("hi\r"));
+
+    expect(result).toBe("written");
+    const sent = tmux.calls.find((c) => c[0] === "send-keys");
+    // "hi\r" — Enter survives as 0d, which `send-keys -l` could not carry.
+    expect(sent).toEqual(["send-keys", "-t", "orca-worker-sess-1", "-H", "68", "69", "0d"]);
+  });
+
+  it("refuses input while the agent is mid-turn, rather than queueing it", async () => {
+    // The orchestrator's deliver() clears the composer with C-u before pasting,
+    // so keys admitted here would be erased — or would corrupt its paste.
+    const tmux = fakeTmux(["✻ Thinking… (esc to interrupt)\n❯ \n"]);
+    const result = await manager(tmux).writeInput("sess-1", Buffer.from("hi"));
+
+    expect(result).toBe("busy");
+    expect(tmux.calls.some((c) => c[0] === "send-keys")).toBe(false);
+  });
+
+  it("reports no_session when the worker's tmux session is gone", async () => {
+    const tmux: TmuxRunner = { run: async (args) => ({ stdout: "", stderr: "", code: args[0] === "has-session" ? 1 : 0 }) };
+    expect(await manager(tmux).writeInput("sess-1", Buffer.from("hi"))).toBe("no_session");
+  });
+
+  it("reuses one idle check across a burst of keystrokes", async () => {
+    // A capture-pane per character would spawn a tmux process per keypress.
+    const tmux = fakeTmux(["✻ done\n❯ \n"]);
+    const mgr = manager(tmux);
+    for (const ch of "hello") await mgr.writeInput("sess-1", Buffer.from(ch));
+
+    expect(tmux.calls.filter((c) => c[0] === "capture-pane")).toHaveLength(1);
+    expect(tmux.calls.filter((c) => c[0] === "send-keys")).toHaveLength(5);
+  });
+
+  it("writes nothing for an empty payload", async () => {
+    const tmux = fakeTmux(["✻ done\n❯ \n"]);
+    expect(await manager(tmux).writeInput("sess-1", Buffer.alloc(0))).toBe("written");
+    expect(tmux.calls.some((c) => c[0] === "send-keys")).toBe(false);
+  });
+});
+
+describe("WorkerSessionManager.writeInput ordering", () => {
+  it("delivers a burst of keystrokes in the order they were typed", async () => {
+    // Each keystroke is its own send-keys process. Fired concurrently they
+    // complete out of order and the agent's composer showed scrambled text.
+    const calls: string[][] = [];
+    let pending = 0;
+    const tmux: TmuxRunner = {
+      run: vi.fn(async (args: string[]) => {
+        // Later calls finish sooner unless the writes are serialized.
+        const delay = Math.max(0, 20 - pending++ * 5);
+        await new Promise((r) => setTimeout(r, delay));
+        calls.push(args);
+        return { stdout: args[0] === "capture-pane" ? "✻ done\n❯ \n" : "", stderr: "", code: 0 };
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+
+    const results = await Promise.all(
+      [..."hello"].map((ch) => mgr.writeInput("sess-1", Buffer.from(ch)))
+    );
+
+    expect(results).toEqual(["written", "written", "written", "written", "written"]);
+    const typed = calls
+      .filter((c) => c[0] === "send-keys")
+      .map((c) => c.slice(4).map((hex) => String.fromCharCode(parseInt(hex, 16))).join(""));
+    expect(typed.join("")).toBe("hello");
+  });
+});
+
+describe("WorkerSessionManager.writeInput batching", () => {
+  it("sends a burst as one tmux call instead of one per character", async () => {
+    // Every send is a subprocess. One per keystroke put typing behind the fingers.
+    const calls: string[][] = [];
+    const tmux: TmuxRunner = {
+      run: vi.fn(async (args: string[]) => {
+        calls.push(args);
+        await new Promise((r) => setTimeout(r, 5));
+        return { stdout: args[0] === "capture-pane" ? "✻ done\n❯ \n" : "", stderr: "", code: 0 };
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+
+    const results = await Promise.all([..."hello"].map((ch) => mgr.writeInput("sess-1", Buffer.from(ch))));
+
+    expect(results).toEqual(Array(5).fill("written"));
+    const sends = calls.filter((c) => c[0] === "send-keys");
+    // The first character goes out at once; the other four ride one batch.
+    expect(sends.length).toBeLessThanOrEqual(2);
+    const typed = sends.map((c) => c.slice(4).map((h) => String.fromCharCode(parseInt(h, 16))).join("")).join("");
+    expect(typed).toBe("hello");
+  });
+
+  it("does not spend a liveness check on the typing path", async () => {
+    const calls: string[][] = [];
+    const tmux: TmuxRunner = {
+      run: vi.fn(async (args: string[]) => {
+        calls.push(args);
+        return { stdout: args[0] === "capture-pane" ? "✻ done\n❯ \n" : "", stderr: "", code: 0 };
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+
+    expect(await mgr.writeInput("sess-1", Buffer.from("x"))).toBe("written");
+    // send-keys reports a missing session itself, so asking first was a wasted
+    // subprocess on every keystroke.
+    expect(calls.some((c) => c[0] === "has-session")).toBe(false);
+  });
+
+  it("reports no_session when the send is refused because the pane is gone", async () => {
+    const tmux: TmuxRunner = {
+      run: async (args) => ({
+        stdout: args[0] === "capture-pane" ? "✻ done\n❯ \n" : "",
+        stderr: "",
+        code: args[0] === "send-keys" ? 1 : 0,
+      }),
+    };
+    const mgr = new WorkerSessionManager({
+      privateRoot: mkdtempSync(join(tmpdir(), "orca-worker-")), authToken: "tok",
+      hookResolverCommand: ["node", "test-daemon.js"], claudeBin: "claude", tmux, captureSink: () => {},
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0, resolveProvider,
+    });
+
+    expect(await mgr.writeInput("sess-1", Buffer.from("x"))).toBe("no_session");
+  });
+});
+
+describe("pane capture survives a daemon restart", () => {
+  it("re-establishes the pipe without toggling the existing one off", async () => {
+    // `pipe-pane -o` toggles: it opens a pipe when none is open and CLOSES the one
+    // that is. The tmux server outlives the daemon, so a worker's pipe is still
+    // open when reattach runs — and that call was switching capture off, blinding
+    // the daemon to its agents' output on every other restart.
+    const tmux = fakeTmux(["auto mode on\n❯ \n"]);
+    const base = mkdtempSync(join(tmpdir(), "orca-worker-"));
+    const deps = {
+      privateRoot: base, authToken: "tok", hookResolverCommand: ["node", "test-daemon.js"],
+      claudeBin: "claude", tmux, captureSink: () => {}, resolveProvider,
+      startupTimeoutMs: 20, pollMs: 1, readyQuietMs: 0,
+    };
+    const wsDir = mkdtempSync(join(tmpdir(), "orca-worker-ws-"));
+
+    await new WorkerSessionManager(deps).spawn({
+      sessionId: "sess-1", goalId: "g1", adapterId: "claude-code",
+      workspacePath: wsDir, command: "claude", args: [], env: {},
+    });
+    // A fresh manager, as a restarted daemon builds, adopting the live session.
+    await new WorkerSessionManager(deps).reattach("sess-1", wsDir);
+
+    const pipes = tmux.calls.filter((c) => c[0] === "pipe-pane");
+    expect(pipes).toHaveLength(2);
+    for (const pipe of pipes) expect(pipe).not.toContain("-o");
   });
 });

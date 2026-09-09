@@ -687,6 +687,14 @@ export const SessionSummary = z.object({
   role: z.string().nullable(),
   title: z.string(),
   status: SessionStatus,
+  // The daemon owns this session's terminal geometry and a viewer may not change
+  // it (a workflow worker's tmux pane). Such a viewer must render at exactly
+  // terminalCols x terminalRows; any other grid scrambles the cursor-addressed
+  // redraws recorded against it. On the SUMMARY rather than the detail so a
+  // viewer can size its terminal the moment it mounts, with nothing to await.
+  paneFixed: z.boolean().optional(),
+  terminalCols: z.number().nullable().optional(),
+  terminalRows: z.number().nullable().optional(),
   createdAt: z.string().datetime(),
   startedAt: z.string().datetime().nullable(),
   exitedAt: z.string().datetime().nullable(),
@@ -701,8 +709,6 @@ export const SessionDetail = SessionSummary.extend({
   command: z.string().nullable(),
   args: z.array(z.string()).nullable(),
   cwd: z.string().nullable(),
-  terminalCols: z.number().nullable(),
-  terminalRows: z.number().nullable(),
   exitCode: z.number().nullable(),
   exitSignal: z.string().nullable(),
   failureReason: SessionFailureReason.nullable(),
@@ -827,6 +833,9 @@ export type SessionOutputFrame = z.infer<typeof SessionOutputFrame>;
 export const SessionErrorFrameCode = z.enum([
   "unknown_session",
   "not_active",
+  // The session is live and writable, but its agent is mid-turn. Distinct from
+  // not_active so a viewer can say "wait" rather than "this is over".
+  "agent_busy",
   "invalid_message"
 ]);
 export type SessionErrorFrameCode = z.infer<typeof SessionErrorFrameCode>;

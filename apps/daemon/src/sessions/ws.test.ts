@@ -463,3 +463,213 @@ describe('session WS frames', () => {
     ws.terminate();
   });
 });
+
+// Workflow workers run on the daemon's tmux server, so the daemon holds no pty
+// handle for them. Their keystrokes take the idle-gated tmux path instead.
+describe('session.input to a tmux-backed worker session', () => {
+  let server: FastifyInstance;
+  let sessionId: string;
+  const dirs: string[] = [];
+  let writeInput: ReturnType<typeof vi.fn>;
+
+  async function boot(result: 'written' | 'busy' | 'no_session'): Promise<void> {
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-ws-worker-'));
+    const wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-ws-worker-ws-')));
+    dirs.push(dbDir, wsDir);
+    resetRuntimeStmts();
+    const config = createConfig(dbDir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir());
+    writeInput = vi.fn(async () => result);
+    server = createServer(config, {
+      sessionRuntime: new SessionRuntime(new FakePtyManager(), 100, 1024 * 1024),
+      workerWriteInput: writeInput as never,
+    });
+    await server.ready();
+
+    const goalRes = await server.inject({
+      method: 'POST', url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'worker-input', intent: 'test intent', successCriteria: ['ship it'] },
+    });
+    const goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
+    const wsRes = await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir },
+    });
+    const workspaceId = (JSON.parse(wsRes.body) as { workspace: { id: string } }).workspace.id;
+    // Never started, so the daemon owns no pty handle for it — exactly the shape
+    // of a worker the orchestrator spawned into tmux.
+    const sessRes = await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'claude-code' },
+    });
+    sessionId = CreateSessionResponse.parse(JSON.parse(sessRes.body)).session.id;
+  }
+
+  afterEach(async () => {
+    await server?.close();
+    closeDatabase();
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  async function send(text: string): Promise<{ ws: Awaited<ReturnType<typeof server.injectWS>> }> {
+    const ws = await server.injectWS('/v1/events?token=test-token');
+    ws.send(JSON.stringify({
+      type: 'session.input',
+      sessionId,
+      dataBase64: Buffer.from(text).toString('base64'),
+    }));
+    return { ws };
+  }
+
+  it('hands the decoded keystrokes to the worker and reports no error', async () => {
+    await boot('written');
+    const { ws } = await send('hi\r');
+    const errored = firstMatch(ws, (m) => m.type === 'session.error', 100).then(() => true).catch(() => false);
+
+    expect(await errored).toBe(false);
+    expect(writeInput).toHaveBeenCalledWith(sessionId, Buffer.from('hi\r'));
+    ws.terminate();
+  });
+
+  it('says the agent is busy — not that the session is over — while a turn runs', async () => {
+    await boot('busy');
+    const { ws } = await send('hi');
+
+    const frame = await firstMatch(ws, (m) => m.type === 'session.error');
+    expect(frame.code).toBe('agent_busy');
+    expect(frame.message).toContain('wait for it to finish');
+    ws.terminate();
+  });
+
+  it('falls back to not_active when the worker has no tmux session left', async () => {
+    await boot('no_session');
+    const { ws } = await send('hi');
+
+    const frame = await firstMatch(ws, (m) => m.type === 'session.error');
+    expect(frame.code).toBe('not_active');
+    ws.terminate();
+  });
+});
+
+describe('session.resize against a daemon-owned pane', () => {
+  const dirs: string[] = [];
+  let server: FastifyInstance;
+
+  afterEach(async () => {
+    await server?.close();
+    closeDatabase();
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  it('is accepted silently — a viewer reporting its own size is not a dead session', async () => {
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-ws-pane-'));
+    const wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-ws-pane-ws-')));
+    dirs.push(dbDir, wsDir);
+    resetRuntimeStmts();
+    const config = createConfig(dbDir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir());
+    server = createServer(config, {
+      sessionRuntime: new SessionRuntime(new FakePtyManager(), 100, 1024 * 1024),
+    });
+    await server.ready();
+
+    const goalRes = await server.inject({
+      method: 'POST', url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'pane-fixed', intent: 'test intent', successCriteria: ['ship it'] },
+    });
+    const goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
+    const wsRes = await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir },
+    });
+    const workspaceId = (JSON.parse(wsRes.body) as { workspace: { id: string } }).workspace.id;
+    const sessRes = await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'claude-code' },
+    });
+    const sessionId = CreateSessionResponse.parse(JSON.parse(sessRes.body)).session.id;
+    // As WorkerSessionManager marks a worker it spawned into tmux.
+    db.prepare('UPDATE sessions SET pane_fixed = 1, terminal_cols = 220, terminal_rows = 50 WHERE id = ?').run(sessionId);
+
+    const ws = await server.injectWS('/v1/events?token=test-token');
+    const errored = firstMatch(ws, (m) => m.type === 'session.error', 100).then(() => true).catch(() => false);
+    ws.send(JSON.stringify({ type: 'session.resize', sessionId, cols: 100, rows: 30 }));
+
+    expect(await errored).toBe(false);
+    // And the pane keeps the geometry the daemon gave it.
+    const res = await server.inject({ method: 'GET', url: `/v1/sessions/${sessionId}`, headers: AUTH_HEADERS });
+    const body = JSON.parse(res.body) as { session: { terminalCols: number; terminalRows: number; paneFixed: boolean } };
+    expect(body.session).toMatchObject({ paneFixed: true, terminalCols: 220, terminalRows: 50 });
+    ws.terminate();
+  });
+});
+
+// Output from a workflow worker is tailed off its tmux pane rather than read from
+// a pty this process owns. That path stored the bytes but never fanned them out,
+// so a terminal already open on the session sat frozen while the agent worked.
+describe('worker pane output reaches live subscribers', () => {
+  const dirs: string[] = [];
+  let server: FastifyInstance;
+
+  afterEach(async () => {
+    await server?.close();
+    closeDatabase();
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  it('broadcasts captured pane bytes to a subscribed socket', async () => {
+    const dbDir = mkdtempSync(path.join(os.tmpdir(), 'orca-ws-capture-'));
+    const wsDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-ws-capture-ws-')));
+    dirs.push(dbDir, wsDir);
+    resetRuntimeStmts();
+    const config = createConfig(dbDir);
+    const db = openDatabase(config);
+    runMigrations(db, defaultMigrationsDir());
+    const runtime = new SessionRuntime(new FakePtyManager(), 100, 1024 * 1024);
+    server = createServer(config, { sessionRuntime: runtime });
+    await server.ready();
+
+    const goalRes = await server.inject({
+      method: 'POST', url: '/v1/goals',
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { title: 'worker-output', intent: 'test intent', successCriteria: ['ship it'] },
+    });
+    const goalId = CreateGoalResponse.parse(JSON.parse(goalRes.body)).goal.id;
+    const wsRes = await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/workspaces`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { inputPath: wsDir },
+    });
+    const workspaceId = (JSON.parse(wsRes.body) as { workspace: { id: string } }).workspace.id;
+    const sessRes = await server.inject({
+      method: 'POST', url: `/v1/goals/${goalId}/sessions`,
+      headers: { 'content-type': 'application/json', ...AUTH_HEADERS },
+      payload: { workspaceId, adapterId: 'claude-code' },
+    });
+    const sessionId = CreateSessionResponse.parse(JSON.parse(sessRes.body)).session.id;
+
+    const ws = await server.injectWS('/v1/events?token=test-token');
+    ws.send(JSON.stringify({ type: 'session.subscribe', sessionId }));
+    await tick();
+
+    const outputPromise = firstMatch(ws, (m) => m.type === 'session.output');
+    // As the tmux tail does when the agent draws to its pane.
+    runtime.broadcastOutput(sessionId, 0, 0, Buffer.from('agent drew this'));
+
+    const frame = await outputPromise;
+    expect(frame.sessionId).toBe(sessionId);
+    expect(Buffer.from(frame.dataBase64 as string, 'base64').toString()).toBe('agent drew this');
+    ws.terminate();
+  });
+});

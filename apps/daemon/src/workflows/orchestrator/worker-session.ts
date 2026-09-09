@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
-  defaultTmuxRunner, tmuxSocketPath, newSession, capturePane, sendEnter, sendKey, paste, pipePaneToFile, killSession, hasSession,
+  defaultTmuxRunner, tmuxSocketPath, newSession, capturePane, sendEnter, sendKey, sendRawBytes, paste, pipePaneToFile, killSession, hasSession,
+  WORKER_PANE_COLS, WORKER_PANE_ROWS,
   type TmuxRunner,
   TMUX_OWNER_VAR,
 } from "../../tmux/runner.js";
@@ -62,9 +63,34 @@ function liveRegion(pane: string): string {
   return lines.slice(Math.max(0, anchor - LIVE_REGION_LOOKBACK)).join("\n");
 }
 
+/**
+ * Whether a captured pane shows a composer that is ready for input: a prompt is
+ * rendered and no turn is in flight. This is exactly the readiness `deliver()`
+ * waits for, factored out so a human typing at the embedded terminal is held to
+ * the same bar the orchestrator holds itself to.
+ */
+export function isPaneIdle(pane: string): boolean {
+  const region = liveRegion(pane);
+  if (BUSY_DEFAULT.test(region)) return false;
+  return PROMPT_READY.test(region) || CODEX_PROMPT_IDLE.test(region);
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type DeliverResult = "delivered" | "no_session" | "timeout";
+export type WriteInputResult = "written" | "no_session" | "busy";
+
+// A capture-pane per keystroke would spawn a tmux process per character, so the
+// idle verdict is reused briefly. The window is short enough that a turn
+// starting mid-burst blocks the rest of it within a few hundred milliseconds.
+const IDLE_CACHE_MS = 400;
+
+// How often the pane file is read for new bytes. Deliberately far shorter than
+// `pollMs`, which paces capture-pane — a SUBPROCESS — for the orchestrator's
+// idle detection. This is a positional read on an already-open fd, so it is
+// cheap enough to run at screen rates, and it is the path a human's own
+// keystrokes take back to their terminal: at 300ms that reads as lag.
+const TAIL_POLL_MS = 40;
 
 export interface WorkerSpawnInput {
   sessionId: string;
@@ -105,7 +131,11 @@ export interface WorkerSessionDeps {
   /** The data dir that owns the sessions this manager creates (see TMUX_OWNER_VAR). Defaults to privateRoot's parent. */
   owner?: string;
   captureSink: (sessionId: string, chunk: Buffer) => void; // appends pane bytes to the output store
-  markRunning?: (sessionId: string) => void; // optional: flip DB session status to running
+  // Optional: flip the DB session row to running, and record the geometry its
+  // pane was created at. Without the geometry the row reports NULL size and a
+  // viewer has nothing to render at, so it guesses its own — which is what made
+  // the embedded terminal illegible.
+  markRunning?: (sessionId: string, pane: { cols: number; rows: number }) => void;
   // Optional: flip the DB session row terminal when the manager reaps the
   // worker. Without this, deliberately-terminated workers stay 'running' in
   // the DB forever (dishonest status; observed live 2026-07-07).
@@ -113,6 +143,8 @@ export interface WorkerSessionDeps {
   trustPattern?: RegExp;
   readyPattern?: RegExp;
   pollMs?: number;
+  /** Overrides how often the pane file is read; see TAIL_POLL_MS. */
+  tailPollMs?: number;
   startupTimeoutMs?: number;
   readyQuietMs?: number;
   postPasteMs?: number;
@@ -121,6 +153,11 @@ export interface WorkerSessionDeps {
 }
 
 interface WorkerSession { name: string; adapterId: string; ready: Promise<void>; }
+interface WriteQueue {
+  pending: Buffer[];
+  waiters: { resolve: (r: WriteInputResult) => void; reject: (e: unknown) => void }[];
+  draining: boolean;
+}
 interface WorkerTail {
   fd: number;
   closed: boolean;
@@ -130,6 +167,11 @@ interface WorkerTail {
 export class WorkerSessionManager {
   private readonly sessions = new Map<string, WorkerSession>();
   private readonly tails = new Map<string, WorkerTail>();
+  private readonly idleCache = new Map<string, { idle: boolean; until: number }>();
+  // One write at a time per worker: each send is its own tmux process, and
+  // concurrent ones finish out of order — typed text arrived scrambled. Bytes
+  // that arrive while a send is in flight wait here and go out together.
+  private readonly writeQueues = new Map<string, WriteQueue>();
   private readonly tmux: TmuxRunner;
   constructor(private readonly deps: WorkerSessionDeps) {
     this.tmux = deps.tmux ?? defaultTmuxRunner(tmuxSocketPath(this.owner()));
@@ -174,7 +216,7 @@ export class WorkerSessionManager {
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
     this.startTail(input.sessionId, join(cfgDir, "pane.out"));
     this.sessions.set(input.sessionId, { name, adapterId: input.adapterId, ready: this.startup(name) });
-    this.deps.markRunning?.(input.sessionId);
+    this.deps.markRunning?.(input.sessionId, { cols: WORKER_PANE_COLS, rows: WORKER_PANE_ROWS });
   }
 
   private async startup(name: string): Promise<void> {
@@ -245,7 +287,10 @@ export class WorkerSessionManager {
     // baseline stat asynchronously, so bytes appended between setup and that first
     // stat get folded into the baseline and are never reported (flaky under load).
     // A self-driven interval reading pos→EOF is deterministic; pump() is idempotent.
-    const timer = setInterval(pump, this.deps.pollMs ?? 300);
+    // Never slower than the orchestrator's own loop, so a test that speeds one up
+    // gets a tail to match.
+    const interval = this.deps.tailPollMs ?? Math.min(this.deps.pollMs ?? 300, TAIL_POLL_MS);
+    const timer = setInterval(pump, interval);
     timer.unref?.();
     tail = {
       fd,
@@ -352,7 +397,7 @@ export class WorkerSessionManager {
     await pipePaneToFile(this.tmux, name, join(cfgDir, "pane.out"));
     this.sessions.set(sessionId, { name, adapterId: "", ready: Promise.resolve() });
     try {
-      this.deps.markRunning?.(sessionId);
+      this.deps.markRunning?.(sessionId, { cols: WORKER_PANE_COLS, rows: WORKER_PANE_ROWS });
       this.startTail(sessionId, join(cfgDir, "pane.out"));
     } catch (error) {
       this.sessions.delete(sessionId);
@@ -365,6 +410,8 @@ export class WorkerSessionManager {
   async terminate(sessionId: string, reason = "worker.terminate"): Promise<void> {
     const s = this.sessions.get(sessionId);
     this.sessions.delete(sessionId);
+    this.idleCache.delete(sessionId);
+    this.writeQueues.delete(sessionId);
     this.stopTail(sessionId);
     await killSession(this.tmux, s?.name ?? this.name(sessionId), reason);
     this.deps.markExited?.(sessionId);
@@ -377,6 +424,73 @@ export class WorkerSessionManager {
    * Tolerates a session missing from the in-memory map (derives the tmux name)
    * so a live agent can be interrupted after a daemon restart.
    */
+  /**
+   * Raw keystrokes from a human sitting at this worker's embedded terminal.
+   *
+   * The orchestrator drives the same pane, and its delivery is not atomic: it
+   * waits for idle, sends C-u to clear the composer, pastes, then Enter. Keys
+   * arriving inside that window are erased by the C-u or corrupt the paste. So
+   * input is admitted only while the pane is idle — the same readiness
+   * `deliver()` waits for — and refused, not queued, while a turn is in flight.
+   */
+  async writeInput(sessionId: string, bytes: Buffer): Promise<WriteInputResult> {
+    if (bytes.length === 0) return "written";
+    let queue = this.writeQueues.get(sessionId);
+    if (!queue) {
+      queue = { pending: [], waiters: [], draining: false };
+      this.writeQueues.set(sessionId, queue);
+    }
+    queue.pending.push(bytes);
+    const verdict = new Promise<WriteInputResult>((resolve, reject) => {
+      queue.waiters.push({ resolve, reject });
+    });
+    if (!queue.draining) void this.drainWrites(sessionId, queue);
+    return verdict;
+  }
+
+  /**
+   * The first keystroke goes out immediately; everything typed while that send is
+   * in flight rides the next one as a single batch. A burst therefore costs one
+   * tmux round trip rather than one per character, and typing never falls behind
+   * the fingers.
+   */
+  private async drainWrites(sessionId: string, queue: WriteQueue): Promise<void> {
+    queue.draining = true;
+    try {
+      while (queue.pending.length > 0) {
+        const batch = Buffer.concat(queue.pending.splice(0));
+        const waiters = queue.waiters.splice(0);
+        try {
+          const result = await this.writeInputNow(sessionId, batch);
+          for (const waiter of waiters) waiter.resolve(result);
+        } catch (error) {
+          // One failed batch must not strand the keystrokes queued behind it.
+          for (const waiter of waiters) waiter.reject(error);
+        }
+      }
+    } finally {
+      queue.draining = false;
+    }
+  }
+
+  private async writeInputNow(sessionId: string, bytes: Buffer): Promise<WriteInputResult> {
+    const name = this.sessions.get(sessionId)?.name ?? this.name(sessionId);
+    if (!(await this.paneIdle(sessionId, name))) {
+      // A pane that is not idle is either mid-turn or gone. Only here, off the
+      // typing path, is it worth a second tmux call to tell those apart.
+      return (await hasSession(this.tmux, name)) ? "busy" : "no_session";
+    }
+    return (await sendRawBytes(this.tmux, name, bytes)) ? "written" : "no_session";
+  }
+
+  private async paneIdle(sessionId: string, name: string): Promise<boolean> {
+    const cached = this.idleCache.get(sessionId);
+    if (cached && Date.now() < cached.until) return cached.idle;
+    const idle = isPaneIdle(await capturePane(this.tmux, name));
+    this.idleCache.set(sessionId, { idle, until: Date.now() + IDLE_CACHE_MS });
+    return idle;
+  }
+
   async interrupt(sessionId: string): Promise<void> {
     const name = this.sessions.get(sessionId)?.name ?? this.name(sessionId);
     if (!(await hasSession(this.tmux, name))) return;

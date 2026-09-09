@@ -195,6 +195,8 @@ describe("runMigrations", () => {
       "0067_model_catalog_cache.sql",
       "0068_session_model_choice.sql",
       "0069_step_run_effort.sql",
+      "0070_session_pane_fixed.sql",
+      "0071_backfill_worker_pane_geometry.sql",
     ]);
   });
 
@@ -356,6 +358,8 @@ describe("runMigrations", () => {
       "0067_model_catalog_cache.sql",
       "0068_session_model_choice.sql",
       "0069_step_run_effort.sql",
+      "0070_session_pane_fixed.sql",
+      "0071_backfill_worker_pane_geometry.sql",
     ]);
 
     const goalCount = (
@@ -670,6 +674,8 @@ describe("session tables migration", () => {
       "0067_model_catalog_cache.sql",
       "0068_session_model_choice.sql",
       "0069_step_run_effort.sql",
+      "0070_session_pane_fixed.sql",
+      "0071_backfill_worker_pane_geometry.sql",
     ]);
 
     const tables = (
@@ -1217,6 +1223,8 @@ describe("migration 0010 workflows", () => {
       "0067_model_catalog_cache.sql",
       "0068_session_model_choice.sql",
       "0069_step_run_effort.sql",
+      "0070_session_pane_fixed.sql",
+      "0071_backfill_worker_pane_geometry.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());
@@ -1841,6 +1849,8 @@ describe("migration 0012 orchestration transport", () => {
       "0067_model_catalog_cache.sql",
       "0068_session_model_choice.sql",
       "0069_step_run_effort.sql",
+      "0070_session_pane_fixed.sql",
+      "0071_backfill_worker_pane_geometry.sql",
     ]);
 
     const rerun = runMigrations(db, defaultMigrationsDir());

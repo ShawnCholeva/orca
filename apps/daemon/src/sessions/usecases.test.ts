@@ -40,6 +40,7 @@ import { resetPreparedStatements as resetProjectionStmts } from './projection.js
 import { resetPreparedStatements as resetRuntimeStmts, SessionRuntime } from './runtime.js';
 import { createSessionOutputStore } from './output-store.js';
 
+const NOW = '2026-01-01T00:00:00.000Z';
 const tempDirs: string[] = [];
 
 function createConfig(dataDir: string): Config {
@@ -303,6 +304,35 @@ describe('listSessionsForGoal', () => {
   it('returns empty array for unknown goal', () => {
     const db = freshDb();
     expect(listSessionsForGoal(db, 'no-goal')).toEqual([]);
+  });
+
+  it('carries the workflow step run a session was launched for', async () => {
+    // The orchestrator binds a worker session to the step run it is executing,
+    // and callers (the tracker's step doorways) join on that link. It was stored
+    // but never projected, so every session read back looked unattached.
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-uc-steprun-'));
+    tempDirs.push(wsDir);
+    seedGoal(db, 'g1');
+    seedWorkspace(db, 'ws1', 'g1', wsDir);
+    db.prepare(
+      `INSERT INTO workflow_templates (id, name, created_at, updated_at) VALUES ('tpl1', 'T', ?, ?)`
+    ).run(NOW, NOW);
+    db.prepare(
+      `INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at)
+       VALUES ('run1', 'g1', 'tpl1', 1, 'active', ?)`
+    ).run(NOW);
+    db.prepare(
+      `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, fingerprint)
+       VALUES ('sr1', 'g1', 'run1', 'execution', 0, 1, 'active', 'fp1')`
+    ).run();
+
+    const ctx: SessionCtx = { db, bus: eventBus, adapterRegistry: makeAdapterRegistry() };
+    const created = await createSession(ctx, { goalId: 'g1', workspaceId: 'ws1', adapterId: 'claude-code' });
+    db.prepare('UPDATE sessions SET workflow_step_run_id = ? WHERE id = ?').run('sr1', created.id);
+
+    expect(listSessionsForGoal(db, 'g1')[0]?.workflowStepRunId).toBe('sr1');
+    expect(getSession(db, created.id).session.workflowStepRunId).toBe('sr1');
   });
 });
 
@@ -879,5 +909,48 @@ describe('stopSession', () => {
 
     expect(hookCalls).toHaveLength(1);
     expect(hookCalls[0]).toBe(sessionId);
+  });
+});
+
+describe('worker pane geometry backfill', () => {
+  it('gives pre-existing workflow worker sessions the geometry they were created at', () => {
+    // Their panes were made by newSession at the fixed size, but nothing recorded
+    // it, so a viewer had nothing to render at and scrambled their replay.
+    const db = freshDb();
+    const wsDir = mkdtempSync(path.join(os.tmpdir(), 'orca-uc-backfill-'));
+    tempDirs.push(wsDir);
+    seedGoal(db, 'g1');
+    seedWorkspace(db, 'ws1', 'g1', wsDir);
+    db.prepare(`INSERT INTO workflow_templates (id, name, created_at, updated_at) VALUES ('tpl1','T',?,?)`).run(NOW, NOW);
+    db.prepare(
+      `INSERT INTO workflow_runs (id, goal_id, template_id, template_version, status, started_at)
+       VALUES ('run1','g1','tpl1',1,'active',?)`
+    ).run(NOW);
+    db.prepare(
+      `INSERT INTO workflow_step_runs (id, goal_id, workflow_run_id, step_template_id, ordinal, attempt, status, fingerprint)
+       VALUES ('sr1','g1','run1','execution',0,1,'passed','fp1')`
+    ).run();
+
+    // A worker row as it looked before the geometry was recorded, and a plain
+    // session, which the backfill must leave alone.
+    db.prepare(
+      `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at, workflow_step_run_id)
+       VALUES ('worker','g1','ws1','claude-code','Workflow step: sr1','exited',?,'sr1')`
+    ).run(NOW);
+    db.prepare(
+      `INSERT INTO sessions (id, goal_id, workspace_id, adapter_id, title, status, created_at)
+       VALUES ('manual','g1','ws1','claude-code','Manual','exited',?)`
+    ).run(NOW);
+    db.prepare('UPDATE sessions SET pane_fixed = 0, terminal_cols = NULL, terminal_rows = NULL').run();
+
+    // freshDb() already migrated, so replay the backfill as an upgrade would.
+    db.prepare("DELETE FROM _migrations WHERE name = '0071_backfill_worker_pane_geometry.sql'").run();
+    runMigrations(db, defaultMigrationsDir());
+
+    const sessions = listSessionsForGoal(db, 'g1');
+    expect(sessions.find((s) => s.id === 'worker')).toMatchObject({
+      paneFixed: true, terminalCols: 220, terminalRows: 50,
+    });
+    expect(sessions.find((s) => s.id === 'manual')).toMatchObject({ paneFixed: false });
   });
 });

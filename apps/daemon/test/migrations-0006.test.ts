@@ -207,6 +207,8 @@ describe('context migration 0006_context.sql', () => {
       '0067_model_catalog_cache.sql',
       '0068_session_model_choice.sql',
       '0069_step_run_effort.sql',
+      '0070_session_pane_fixed.sql',
+      '0071_backfill_worker_pane_geometry.sql',
     ]);
 
     const tables = (
@@ -343,6 +345,8 @@ describe('context migration 0006_context.sql', () => {
       '0067_model_catalog_cache.sql',
       '0068_session_model_choice.sql',
       '0069_step_run_effort.sql',
+      '0070_session_pane_fixed.sql',
+      '0071_backfill_worker_pane_geometry.sql',
     ]);
 
     const counts = {
