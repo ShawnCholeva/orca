@@ -12,6 +12,19 @@ vi.mock("../theme/ThemeProvider", () => ({
   useTheme: () => ({ theme: { mode: "dark" } }),
 }));
 
+// The embedded step session pulls in xterm, which jsdom can't construct. Its
+// own test covers it; here it only has to prove the chat hands over to it.
+vi.mock("./components/StepSessionView", () => ({
+  StepSessionView: ({ stepName, onBack }: { stepName: string; onBack: () => void }) => (
+    <div data-testid="step-session">
+      <span>{stepName}</span>
+      <button type="button" onClick={onBack}>
+        Back to orchestrator
+      </button>
+    </div>
+  ),
+}));
+
 const confirmSplitMock = vi.fn();
 const confirmStepMock = vi.fn();
 const decideGateMock = vi.fn();
@@ -44,6 +57,8 @@ const listRecommendationsMock = vi.fn();
 const acceptRecommendationMock = vi.fn();
 const listWorkflowRunsMock = vi.fn();
 const listWorkflowStepRunsMock = vi.fn();
+const listSessionsMock = vi.fn();
+const interruptStepMock = vi.fn();
 const resumeWorkflowRunMock = vi.fn();
 
 vi.mock("../api", () => ({
@@ -56,6 +71,8 @@ vi.mock("../api", () => ({
   getWorkflowRun: (...args: unknown[]) => getWorkflowRunMock(...args),
   listWorkflowRuns: (...args: unknown[]) => listWorkflowRunsMock(...args),
   listWorkflowStepRuns: (...args: unknown[]) => listWorkflowStepRunsMock(...args),
+  listSessions: (...args: unknown[]) => listSessionsMock(...args),
+  interruptStep: (...args: unknown[]) => interruptStepMock(...args),
   getWorkflowStepRun: (...args: unknown[]) => getWorkflowStepRunMock(...args),
   getWorkflowTemplate: (...args: unknown[]) => getWorkflowTemplateMock(...args),
   listActivities: (...args: unknown[]) => listActivitiesMock(...args),
@@ -270,6 +287,10 @@ describe("OrcaChat", () => {
     listWorkflowRunsMock.mockResolvedValue({ runs: [] });
     listWorkflowStepRunsMock.mockReset();
     listWorkflowStepRunsMock.mockResolvedValue({ stepRuns: [] });
+    listSessionsMock.mockReset();
+    listSessionsMock.mockResolvedValue({ sessions: [] });
+    interruptStepMock.mockReset();
+    interruptStepMock.mockResolvedValue(undefined);
     resumeWorkflowRunMock.mockReset();
   });
 
@@ -2780,6 +2801,177 @@ describe("OrcaChat", () => {
     fireEvent.click(approve);
     await waitFor(() => expect(acceptRecommendationMock).toHaveBeenCalledWith("rec-42", {}));
     expect(listRecommendationsMock).not.toHaveBeenCalled();
+  });
+  describe("OrcaChat step sessions", () => {
+    function setupOpenableStep() {
+      setupRunLoad();
+      listWorkflowStepRunsMock.mockResolvedValue({
+        stepRuns: [
+          {
+            id: "step-1",
+            goalId: "goal-1",
+            workflowRunId: "run-1",
+            stepTemplateId: "execution",
+            ordinal: 4,
+            attempt: 1,
+            status: "active",
+            startedAt: now,
+            finishedAt: null,
+            blockedReason: null,
+          },
+        ],
+      });
+      listSessionsMock.mockResolvedValue({
+        sessions: [
+          {
+            id: "sess-1",
+            goalId: "goal-1",
+            workspaceId: "ws-1",
+            adapterId: "claude-code",
+            workflowStepRunId: "step-1",
+            role: "engineer",
+            title: "Workflow step: step-1",
+            status: "running",
+            createdAt: now,
+            startedAt: now,
+            exitedAt: null,
+          },
+        ],
+      });
+    }
+
+    it("puts the step's session in the chat's place, and the chat back on return", async () => {
+      setupOpenableStep();
+      const { OrcaChat } = await import("./OrcaChat");
+
+      const { container } = render(
+        <OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />,
+      );
+
+      const door = await screen.findByRole("button", { name: "Open the Build It session" });
+      expect(container.querySelector(".orca-chat")).not.toHaveAttribute("hidden");
+
+      fireEvent.click(door);
+
+      expect(screen.getByTestId("step-session")).toBeInTheDocument();
+      // The chat is stood down, not torn down: its timeline and streams survive.
+      expect(container.querySelector(".orca-chat")).toHaveAttribute("hidden");
+      // The tracker stays up, so the reader can hop straight to another step.
+      expect(screen.getByText("Step 1 of 1")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Back to orchestrator" }));
+
+      expect(screen.queryByTestId("step-session")).toBeNull();
+      expect(container.querySelector(".orca-chat")).not.toHaveAttribute("hidden");
+    });
+
+    it("puts the keyboard back in the composer on the way out", async () => {
+      setupOpenableStep();
+      const { OrcaChat } = await import("./OrcaChat");
+
+      render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Open the Build It session" }));
+      fireEvent.click(screen.getByRole("button", { name: "Back to orchestrator" }));
+
+      expect(document.activeElement).toBe(screen.getByPlaceholderText("Message Orca…"));
+    });
+
+    it("does not steal focus when the chat returns for a reason other than Back", async () => {
+      // The session vanishing puts the reader back in the chat without them
+      // asking, so it must not move the keyboard out from under them.
+      setupOpenableStep();
+      let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+      openEventStreamMock.mockImplementation((opts: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = opts.onEvent;
+        return { close: vi.fn() };
+      });
+      const { OrcaChat } = await import("./OrcaChat");
+
+      render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Open the Build It session" }));
+
+      listSessionsMock.mockResolvedValue({ sessions: [] });
+      capturedOnEvent!({ type: "workflow.step_run.updated", goalId: "goal-1" });
+      await waitFor(() => expect(screen.queryByTestId("step-session")).toBeNull());
+
+      expect(document.activeElement).not.toBe(screen.getByPlaceholderText("Message Orca…"));
+    });
+
+    it("offers no doorway on a step whose agent has not been launched", async () => {
+      setupRunLoad();
+      listWorkflowStepRunsMock.mockResolvedValue({
+        stepRuns: [
+          {
+            id: "step-1", goalId: "goal-1", workflowRunId: "run-1", stepTemplateId: "execution",
+            ordinal: 4, attempt: 1, status: "active", startedAt: now, finishedAt: null, blockedReason: null,
+          },
+        ],
+      });
+      listSessionsMock.mockResolvedValue({ sessions: [] });
+      const { OrcaChat } = await import("./OrcaChat");
+
+      render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+
+      await screen.findByText("Build It");
+      expect(screen.queryByRole("button", { name: /Open the .* session/ })).toBeNull();
+    });
+
+    it("does not interrupt the agent when Escape is typed into its own terminal", async () => {
+      setupOpenableStep();
+      const { OrcaChat } = await import("./OrcaChat");
+
+      render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+      const door = await screen.findByRole("button", { name: "Open the Build It session" });
+
+      // Outside the session, Escape is still the interrupt it has always been.
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(interruptStepMock).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(door);
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      // Inside it, Escape belongs to the agent.
+      expect(interruptStepMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns to the chat when the step's session goes away", async () => {
+      setupOpenableStep();
+      let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+      openEventStreamMock.mockImplementation((opts: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = opts.onEvent;
+        return { close: vi.fn() };
+      });
+      const { OrcaChat } = await import("./OrcaChat");
+
+      render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Open the Build It session" }));
+      expect(screen.getByTestId("step-session")).toBeInTheDocument();
+
+      listSessionsMock.mockResolvedValue({ sessions: [] });
+      capturedOnEvent!({ type: "workflow.step_run.updated", goalId: "goal-1" });
+
+      await waitFor(() => expect(screen.queryByTestId("step-session")).toBeNull());
+    });
+
+    it("keeps the doorways open when the session list momentarily fails to load", async () => {
+      setupOpenableStep();
+      let capturedOnEvent: ((event: { type: string; goalId: string }) => void) | null = null;
+      openEventStreamMock.mockImplementation((opts: { onEvent: (event: { type: string; goalId: string }) => void }) => {
+        capturedOnEvent = opts.onEvent;
+        return { close: vi.fn() };
+      });
+      const { OrcaChat } = await import("./OrcaChat");
+
+      render(<OrcaChat goals={[goal]} selectedGoalId="goal-1" connectionStatus="open" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Open the Build It session" }));
+
+      listSessionsMock.mockRejectedValue(new Error("network"));
+      capturedOnEvent!({ type: "workflow.step_run.updated", goalId: "goal-1" });
+
+      // A failed refresh is not evidence the session ended, so nobody gets ejected.
+      await waitFor(() => expect(listSessionsMock).toHaveBeenCalledTimes(2));
+      expect(screen.getByTestId("step-session")).toBeInTheDocument();
+    });
   });
 });
 

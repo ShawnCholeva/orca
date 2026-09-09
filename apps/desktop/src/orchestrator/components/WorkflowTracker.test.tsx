@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { WorkflowTracker } from "./WorkflowTracker";
@@ -271,5 +271,41 @@ describe("WorkflowTracker", () => {
     expect(screen.queryByText("running")).toBeNull();
     // Not done either: the active step shows no completion check.
     expect(screen.queryAllByTestId("tracker-done-check")).toHaveLength(1);
+  });
+});
+
+describe("WorkflowTracker step doorways", () => {
+  it("makes only the nodes with a session clickable, and reports the index clicked", () => {
+    const onOpenStep = vi.fn();
+    render(
+      <WorkflowTracker
+        workflowName="Engineering"
+        steps={steps}
+        activeIndex={1}
+        sessionIndices={[0, 1]}
+        onOpenStep={onOpenStep}
+      />,
+    );
+
+    // Only steps whose agent exists are reachable; the pending one is inert.
+    expect(screen.getByRole("button", { name: "Open the Plan It session" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open the Review It session" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open the Build It session" }));
+    expect(onOpenStep).toHaveBeenCalledWith(1);
+  });
+
+  it("leaves every node inert when no sessions exist", () => {
+    render(
+      <WorkflowTracker
+        workflowName="Engineering"
+        steps={steps}
+        activeIndex={1}
+        sessionIndices={[]}
+        onOpenStep={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /Open the .* session/ })).toBeNull();
   });
 });

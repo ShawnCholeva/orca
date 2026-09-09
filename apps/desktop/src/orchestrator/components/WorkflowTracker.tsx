@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 // Horizontal workflow tracker shown at the top of the Orchestrator tab so the
@@ -54,6 +54,10 @@ type Props = {
   // Research). They render as "skipped" — muted, no completion check — so the user
   // can tell a bypassed step from one that actually ran.
   skippedIndices?: number[];
+  // Indices of nodes whose step run launched a worker session the reader can
+  // drop into. Those nodes become buttons; every other node stays inert.
+  sessionIndices?: number[];
+  onOpenStep?: (index: number) => void;
   onViewWorkflows?: () => void;
 };
 
@@ -112,6 +116,50 @@ const ArrowRightIcon = (p: { size?: number; color?: string; style?: CSSPropertie
     p,
   );
 
+const NODE_LAYOUT: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 7,
+  flex: "0 0 auto",
+  width: 92,
+  textAlign: "center",
+};
+
+// One stepper node. It is a real button when its agent's session can be opened,
+// so the doorway is reachable by keyboard and named to a screen reader; inert
+// nodes stay a plain div rather than a disabled button nobody can act on.
+function NodeShell({
+  canOpen,
+  label,
+  onOpen,
+  onHoverChange,
+  children,
+}: {
+  canOpen: boolean;
+  label: string;
+  onOpen: () => void;
+  onHoverChange: (hovered: boolean) => void;
+  children: ReactNode;
+}) {
+  if (!canOpen) return <div style={NODE_LAYOUT}>{children}</div>;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onOpen}
+      onMouseEnter={() => onHoverChange(true)}
+      onMouseLeave={() => onHoverChange(false)}
+      onFocus={() => onHoverChange(true)}
+      onBlur={() => onHoverChange(false)}
+      style={{ all: "unset", ...NODE_LAYOUT, cursor: "pointer" }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function WorkflowTracker({
   workflowName,
   steps,
@@ -125,8 +173,11 @@ export function WorkflowTracker({
   awaitingConfirm = false,
   awaitingUser = false,
   skippedIndices = [],
+  sessionIndices = [],
+  onOpenStep,
   onViewWorkflows,
 }: Props) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   if (steps.length === 0) return null;
   const active = completed || !activeRunning ? undefined : steps[activeIndex];
   // The header counts steps only — gates share the stepper but aren't "Step N".
@@ -244,18 +295,17 @@ export function WorkflowTracker({
             : isActive || isAwaiting
               ? "var(--accent)"
               : "var(--hairline-strong)";
+          // A node is a doorway into its agent only once that agent exists. A
+          // step still pending, one the run routed past, and a shadow-evaluated
+          // gate all have no session, so they stay inert rather than dead-ending.
+          const canOpen = onOpenStep != null && sessionIndices.includes(i);
           return (
             <Fragment key={i}>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 7,
-                  flex: "0 0 auto",
-                  width: 92,
-                  textAlign: "center",
-                }}
+              <NodeShell
+                canOpen={canOpen}
+                label={`Open the ${step.name} session`}
+                onOpen={() => onOpenStep?.(i)}
+                onHoverChange={(on) => setHoveredIndex(on ? i : null)}
               >
                 <div
                   style={{
@@ -309,6 +359,7 @@ export function WorkflowTracker({
                           ? "var(--text-2)"
                           : "var(--text-4)",
                     textWrap: "pretty",
+                    textDecoration: canOpen && hoveredIndex === i ? "underline" : undefined,
                   }}
                 >
                   {step.name}
@@ -395,7 +446,7 @@ export function WorkflowTracker({
                     gate
                   </span>
                 )}
-              </div>
+              </NodeShell>
               {i < steps.length - 1 &&
                 (() => {
                   // The connector joins step i and step i+1. It's between two

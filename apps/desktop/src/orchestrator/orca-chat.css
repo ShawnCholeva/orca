@@ -6,6 +6,11 @@
   gap: 12px;
 }
 
+/* Hidden, not unmounted, while a step's session stands in for it. */
+.orca-chat[hidden] {
+  display: none;
+}
+
 .orca-chat {
   flex: 1;
   min-height: 0;
@@ -1559,3 +1564,81 @@
 /* "Evidence reviewed" is a Scores-style toggle in the action row; its panel
    reuses .step-confirm-evidence, so only the list itself needs bespoke type. */
 .gate-review-evidence-list { margin: 6px 0 0; padding-left: 18px; font-size: 0.85rem; color: var(--text-2); }
+
+/* ── Embedded step session ──────────────────────────────────── */
+/* Takes the chat's place in .orca-chat-tab, so it owns the same box. */
+.step-session {
+  flex: 1;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.step-session-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.step-session-back {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.step-session-back:hover {
+  color: var(--text);
+}
+
+.step-session-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.step-session-adapter {
+  font-size: 10px;
+  color: var(--accent);
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+
+.step-session-status {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.step-session-status--live {
+  color: var(--run);
+}
+
+/* The terminal is chrome-less here and fills the panel, rather than the boxed
+   fixed-height surface it renders as in the Goal Details sessions list. */
+.step-session .session-terminal {
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.step-session .session-terminal-surface {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}

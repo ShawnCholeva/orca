@@ -15,9 +15,18 @@ export interface SessionTerminalWriter {
 export interface SessionStreamState {
   connectionStatus: ConnectionStatus;
   error: string | null;
+  /**
+   * The agent refused a keystroke because it is mid-turn. Not an error — the
+   * session is healthy and will take input again shortly — so it clears itself
+   * rather than sticking around like a failure.
+   */
+  busy: boolean;
   sendInput(data: string): void;
   sendResize(cols: number, rows: number): void;
 }
+
+// How long the "agent is working" notice lingers after the last refused key.
+const BUSY_NOTICE_MS = 2000;
 
 function decodeBase64(dataBase64: string): Uint8Array {
   const binary = atob(dataBase64);
@@ -45,6 +54,8 @@ export function useSessionStream(
 ): SessionStreamState {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyTimerRef = useRef<number | null>(null);
   const writerRef = useRef<SessionTerminalWriter | null>(writer);
   const streamRef = useRef<ReturnType<typeof openSessionStream> | null>(null);
   const lastSeenSeqRef = useRef(0);
@@ -119,9 +130,14 @@ export function useSessionStream(
           handleOutput(frame);
           return;
         }
-        if (frame.sessionId === sessionId || frame.sessionId === undefined) {
-          setError(frame.message);
+        if (frame.sessionId !== sessionId && frame.sessionId !== undefined) return;
+        if (frame.code === "agent_busy") {
+          setBusy(true);
+          if (busyTimerRef.current !== null) window.clearTimeout(busyTimerRef.current);
+          busyTimerRef.current = window.setTimeout(() => setBusy(false), BUSY_NOTICE_MS);
+          return;
         }
+        setError(frame.message);
       },
       onStatus(status) {
         if (!disposed) setConnectionStatus(status);
@@ -132,6 +148,7 @@ export function useSessionStream(
 
     return () => {
       disposed = true;
+      if (busyTimerRef.current !== null) window.clearTimeout(busyTimerRef.current);
       stream.send({ type: "session.unsubscribe", sessionId });
       stream.close();
       streamRef.current = null;
@@ -150,5 +167,5 @@ export function useSessionStream(
     }
   }, [sendFrame, sessionId]);
 
-  return { connectionStatus, error, sendInput, sendResize };
+  return { connectionStatus, error, busy, sendInput, sendResize };
 }

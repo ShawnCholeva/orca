@@ -5,6 +5,7 @@ import type {
   Goal,
   GoalDetailResponse,
   OrchestratorChatMessage,
+  SessionSummary,
   StepAgentChoice,
   WorkflowArtifact,
   WorkflowDecisionTrace,
@@ -28,6 +29,7 @@ import {
   interruptStep,
   listActivities,
   listOrchestratorMessages,
+  listSessions,
   listWorkflowDecisions,
   listWorkflowRunArtifacts,
   listWorkflowRuns,
@@ -58,7 +60,9 @@ import { splitActivityAtDiffs } from "./activity-segments";
 import { PermissionApprovalCard } from "./PermissionApprovalCard";
 import { ProviderRecoveryCard } from "./ProviderRecoveryCard";
 import { WorkerPermissionToggle } from "./WorkerPermissionToggle";
+import { StepSessionView } from "./components/StepSessionView";
 import { WorkflowTracker, type TrackerStep } from "./components/WorkflowTracker";
+import { gateSessionKey, mapStepSessions } from "./step-sessions";
 import { matchSlashCommands, parseSlashCommand } from "./slash-commands";
 import "./orca-chat.css";
 
@@ -80,6 +84,9 @@ type WorkflowState = {
   // Template step ids that actually ran (have a step run). Steps in the template
   // but absent here were routed past (skipped) — the tracker renders them muted.
   executedStepIds: string[];
+  // The worker session behind each node, keyed by step_template_id (gates use
+  // their surrogate key). Absent means there is no agent to drop into yet.
+  stepSessions: Map<string, SessionSummary>;
 };
 
 type ActivityState = {
@@ -105,6 +112,7 @@ const EMPTY_WORKFLOW_STATE: WorkflowState = {
   decisions: [],
   artifacts: [],
   executedStepIds: [],
+  stepSessions: new Map(),
 };
 
 const EMPTY_ACTIVITY_STATE: ActivityState = {
@@ -139,6 +147,12 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // for a failed attempt (never the raw server string).
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  // Which tracker node's session the reader has stepped into, if any. While set,
+  // that agent's terminal stands in for the orchestrator chat.
+  const [openStepIndex, setOpenStepIndex] = useState<number | null>(null);
+  // Set only by Back, so a goal change or a vanished session returns to the chat
+  // without stealing focus from wherever the reader actually is.
+  const focusComposerOnReturnRef = useRef(false);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Track which goal each data set has already loaded for, so SSE-driven
@@ -348,17 +362,26 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
             decisions: [],
             artifacts: [],
             executedStepIds: [],
+            stepSessions: new Map(),
           });
           workflowLoadedGoalRef.current = goalId;
           return;
         }
 
-        const [runResponse, decisionsResponse, artifactsResponse, stepRunsResponse] = await Promise.all([
-          getWorkflowRun(goalId, runId),
-          listWorkflowDecisions(goalId, runId),
-          listWorkflowRunArtifacts(goalId, runId),
-          listWorkflowStepRuns(goalId, runId),
-        ]);
+        const [runResponse, decisionsResponse, artifactsResponse, stepRunsResponse, sessionsResponse] =
+          await Promise.all([
+            getWorkflowRun(goalId, runId),
+            listWorkflowDecisions(goalId, runId),
+            listWorkflowRunArtifacts(goalId, runId),
+            listWorkflowStepRuns(goalId, runId),
+            // Enrichment for the tracker's step doorways only: a failure here
+            // must not cost the reader the whole orchestrator view, and null
+            // (rather than an empty list) keeps the last known doorways rather
+            // than closing them under someone sitting inside one.
+            listSessions(goalId)
+              .then((response) => response.sessions)
+              .catch(() => null),
+          ]);
         if (cancelled) return;
 
         const stepRun = runResponse.run.currentStepRunId
@@ -385,7 +408,7 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           stepName = null;
         }
 
-        setWorkflowState({
+        setWorkflowState((prev) => ({
           detail,
           run: runResponse.run,
           stepRun,
@@ -394,7 +417,10 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           decisions: sortByCreatedAtDesc(decisionsResponse.decisions),
           artifacts: sortByCreatedAtDesc(artifactsResponse.artifacts),
           executedStepIds: stepRunsResponse.stepRuns.map((s) => s.stepTemplateId),
-        });
+          stepSessions: sessionsResponse
+            ? mapStepSessions(stepRunsResponse.stepRuns, sessionsResponse)
+            : prev.stepSessions,
+        }));
         workflowLoadedGoalRef.current = goalId;
       } catch (err) {
         if (!cancelled) {
@@ -641,6 +667,14 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     }
   }
   const trackerSteps: TrackerStep[] = trackerSrc.map((s) => s.item);
+  // The agent behind each tracker node. Steps resolve by their template id;
+  // worker gates by the surrogate step run the engine binds their worker to.
+  const nodeSessions = trackerSrc.map((src) => {
+    const key = src.stepId ?? (src.gateId ? gateSessionKey(src.gateId) : null);
+    return key ? (workflowState.stepSessions.get(key) ?? null) : null;
+  });
+  const sessionIndices = nodeSessions.flatMap((session, i) => (session ? [i] : []));
+  const openStepSession = openStepIndex == null ? null : (nodeSessions[openStepIndex] ?? null);
   // A run parked at a gate has current_step_run_id = NULL (so workflowState.stepRun
   // is null). Detect it from the run cursor + template graph so the tracker parks
   // the gate's own node "awaiting" instead of falling back to step 0.
@@ -823,9 +857,11 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
   // Escape interrupts the running step agent so the user can course-correct:
   // it aborts the agent's current turn and focuses the composer. The correction
   // typed there is forwarded to the now-idle agent through the normal send path.
-  // Active only while a step agent is genuinely running.
+  // Active only while a step agent is genuinely running — and never while the
+  // reader is inside that agent's terminal, where Escape is a key they are
+  // sending to the agent, not a request to interrupt it.
   useEffect(() => {
-    if (!activeStepRunning || !runId) return;
+    if (!activeStepRunning || !runId || openStepIndex != null) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -840,7 +876,38 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activeStepRunning, runId]);
+  }, [activeStepRunning, runId, openStepIndex]);
+
+  // Stepping into an agent is scoped to the goal it belongs to.
+  useEffect(() => {
+    setOpenStepIndex(null);
+  }, [selectedGoalId]);
+
+  // A session that stops existing (a re-run replaced it, the goal's run changed)
+  // must not leave the reader staring at a terminal for nothing.
+  useEffect(() => {
+    if (openStepIndex != null && openStepSession == null) setOpenStepIndex(null);
+  }, [openStepIndex, openStepSession]);
+
+  // Coming back from a step's agent lands on the newest message rather than
+  // wherever the thread happened to be parked before leaving, with the keyboard
+  // already in the composer — the reader was typing a moment ago and is very
+  // likely about to again, just to Orca this time.
+  function handleBackFromStepSession() {
+    setOpenStepIndex(null);
+    focusComposerOnReturnRef.current = true;
+    scrolledGoalRef.current = null;
+    scrolledMessageIdRef.current = null;
+    scrolledTailKeyRef.current = null;
+  }
+
+  // Deferred to an effect because the composer is still hidden at the moment Back
+  // is pressed, and a hidden element cannot take focus.
+  useEffect(() => {
+    if (openStepIndex !== null || !focusComposerOnReturnRef.current) return;
+    focusComposerOnReturnRef.current = false;
+    composerFormRef.current?.querySelector("textarea")?.focus();
+  }, [openStepIndex]);
 
   // Merge messages and terminal activity cards into one timeline ordered by
   // createdAt (id breaks ties), so a step-result card lands between the messages
@@ -1086,10 +1153,22 @@ export function OrcaChat({ goals, selectedGoalId, connectionStatus, onViewWorkfl
           awaitingConfirm={awaitingStepConfirm}
           awaitingUser={awaitingUser}
           skippedIndices={skippedIndices}
+          sessionIndices={sessionIndices}
+          onOpenStep={setOpenStepIndex}
           onViewWorkflows={onViewWorkflows}
         />
       )}
-      <div className="orca-chat">
+      {openStepSession && openStepIndex != null && (
+        <StepSessionView
+          key={openStepSession.id}
+          session={openStepSession}
+          stepName={trackerSteps[openStepIndex]?.name ?? "Step"}
+          onBack={handleBackFromStepSession}
+        />
+      )}
+      {/* Kept mounted behind the step session so its timeline, streams and
+          draft survive a trip into an agent and back. */}
+      <div className="orca-chat" hidden={openStepSession != null}>
         <div className="orca-chat-scroll scroll" ref={scrollRef} onScroll={handleScroll}>
         {!selectedGoal && (
           <SystemCard

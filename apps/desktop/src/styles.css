@@ -335,6 +335,12 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* A refused keystroke while the agent is mid-turn. A passing notice rather than a fault. */
+.session-terminal-busy {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #fbbf24;
+}
+
 .session-terminal-status--open {
   color: #86efac;
 }
